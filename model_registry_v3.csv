@@ -1,0 +1,6 @@
+name,domain,type,accuracy,latency,clients,use_cases,description,contributor,usage,data_drift,pred_drift,cpu_util,mem_util,throughput,error_rate
+Fin-Audit-GPT,Finance,Official,0.98,35,"JP Morgan, Goldman Sachs",Audit Automation,High-precision LLM for detecting non-compliant transactions.,System,8500,0.012,0.015,45,8,450,0.02
+Tax-Compliance-Pro,Finance,Official,0.94,45,"HSBC, Barclays",Tax Mapping,Automates tax code mapping for cross-border trade.,System,6200,0.021,0.025,30,4,210,0.05
+Talent-Match-AI,HR,Official,0.95,25,"Google, Meta",Bias Removal,Matches resumes while masking demographic data.,System,9100,0.005,0.007,25,4,800,0.01
+Eco-Vendor-Scorer,Procurement,Official,0.87,55,"Unilever, Shell",ESG Scoring,Evaluates supplier sustainability via news analytics.,System,4300,0.08,0.09,55,12,120,0.12
+Logi-Route-Optimizer,Supply Chain,Official,0.96,40,"FedEx, DHL",Route Optimization,Reduces carbon footprint via route optimization.,System,7800,0.03,0.04,70,14,350,0.08
