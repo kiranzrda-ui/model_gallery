@@ -35,7 +35,7 @@ if 'registry' not in st.session_state:
     raw_data = [
         # FINANCE
         ["Fin-Audit-GPT", "Finance", "Official", 0.98, "200ms", "JP Morgan, HSBC", "Internal Audit Automation", "LLM for detecting non-compliant transactions in ledgers."],
-        ["Tax-Genie-V2", "Finance", "Official", 0.94, "45ms", "PwC, Deloitte", "VAT Compliance", "Automates tax categorization for cross-border trade."],
+        ["Tax-Genie-V2", "Finance", "Official", 0.94, "45ms", "Accenture", "VAT Compliance", "Automates tax categorization for cross-border trade."],
         ["Risk-Pulse-Forex", "Finance", "Official", 0.88, "10ms", "Barclays", "Currency Risk", "Real-time hedging recommendations for FX volatility."],
         ["Debt-Collector-Optimizer", "Finance", "Community", 0.82, "100ms", "Internal Tech", "Accounts Receivable", "Predicts best time to contact debtors for recovery."],
         ["Equity-Analyst-Pro", "Finance", "Official", 0.91, "1.2s", "BlackRock", "Portfolio Sentiment", "Scans news and earnings calls for buy/sell signals."],
@@ -109,7 +109,7 @@ if role == "Data Scientist":
     with tab1:
         col_s1, col_s2 = st.columns([3, 1])
         with col_s1:
-            q = st.text_input("💬 Search by task, client, or domain (e.g., 'Walmart' or 'Fraud detection')", placeholder="Try 'PwC' or 'NLP'...")
+            q = st.text_input("💬 Search by task, client, or domain (e.g., 'Walmart' or 'Fraud detection')", placeholder="Try 'Accenture' or 'NLP'...")
         with col_s2:
             d_filter = st.selectbox("Industry Domain", ["All"] + list(st.session_state.registry['domain'].unique()))
 
