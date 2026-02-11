@@ -7,13 +7,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 import os, datetime, random, re, csv
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Model Hub 3.0", layout="wide")
+st.set_page_config(page_title="Enterprise Model Marketplace", layout="wide")
 
 st.markdown("""
     <style>
     :root { --accent: #6200EE; --lite-purple: #F3E5F5; --deep-purple: #7B1FA2; --pale-yellow: #FFF9C4; }
     .stApp { background-color: #F8FAFC; font-size: 0.82rem; }
-    
     .model-card {
         background: white; border: 1px solid #e2e8f0; border-top: 3px solid var(--accent);
         padding: 10px; border-radius: 6px; min-height: 330px; 
@@ -23,11 +22,9 @@ st.markdown("""
     .model-title { font-size: 0.85rem; font-weight: 700; color: #1e293b; margin-bottom: 2px; }
     .registry-badge { font-size: 0.55rem; padding: 1px 4px; border-radius: 3px; background: #f1f5f9; border: 1px solid #cbd5e1; color: #475569; font-family: monospace; }
     .use-case-text { font-size: 0.68rem; color: #334155; height: 2.8em; overflow: hidden; margin: 4px 0; line-height: 1.2; }
-    
     .metric-bar { display: flex; justify-content: space-between; background: #F1F5F9; padding: 4px; border-radius: 4px; margin-bottom: 8px; }
     .metric-val { font-size: 0.72rem; font-weight: 700; color: var(--accent); text-align: center; flex: 1; }
     .metric-label { font-size: 0.5rem; color: #94a3b8; display: block; text-transform: uppercase; }
-
     .stButton>button { 
         background-color: var(--lite-purple); color: var(--deep-purple); 
         border: 1px solid var(--deep-purple); border-radius: 4px; 
@@ -37,7 +34,8 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- CONSTANTS & DATA ---
+# --- CONSTANTS ---
+REG_PATH = "model_registry_v3.csv"
 SHAP_FEATURES = {
     "Finance": ["Credit_Score", "Annual_Income", "Debt_Ratio", "Trans_Freq", "Collateral"],
     "Healthcare": ["Age", "BMI", "Blood_Pressure", "Glucose", "Genetic_Score"],
@@ -48,65 +46,71 @@ SHAP_FEATURES = {
     "Risk": ["Exposure_Index", "Counterparty_Score", "Market_Vol", "Liquidity_Gap", "Default_Prob"]
 }
 
-REG_PATH = "model_registry_v3.csv"
-REQ_PATH = "requests_v3.csv"
-
-def get_clean_data():
+# --- SELF-HEALING DATA ENGINE ---
+def load_and_sanitize_data():
     if not os.path.exists(REG_PATH): return pd.DataFrame()
     df = pd.read_csv(REG_PATH)
-    # FORCED NUMERIC CONVERSION TO FIX ROI ERROR
-    numeric_cols = ['usage', 'accuracy', 'latency', 'data_drift', 'revenue_impact', 'risk_exposure', 'cpu_util', 'error_rate', 'throughput']
-    for c in numeric_cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
-    # Ensure approval status exists
-    if 'approval_status' not in df.columns: df['approval_status'] = 'Approved'
+    
+    # Define required columns and types
+    schema = {
+        'accuracy': 0.85, 'latency': 40, 'data_drift': 0.01, 'usage': 100,
+        'revenue_impact': 5000, 'risk_exposure': 1000, 'cpu_util': 30, 'error_rate': 0.01,
+        'approval_status': 'Approved', 'domain': 'Finance', 'contributor': 'System',
+        'model_stage': 'Prod', 'registry_provider': 'MLflow', 'inference_endpoint_id': 'ep-001'
+    }
+    
+    for col, default in schema.items():
+        if col not in df.columns:
+            df[col] = default
+        if col in ['accuracy', 'latency', 'data_drift', 'usage', 'revenue_impact', 'risk_exposure', 'cpu_util']:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(default)
+            
     return df
 
-df_master = get_clean_data()
+df_master = load_and_sanitize_data()
 
-# --- STATE ---
 if 'basket' not in st.session_state: st.session_state.basket = []
 
-# --- SEARCH ENGINE ---
+# --- HYBRID SEARCH ENGINE ---
 def hybrid_search(query, df):
     if not query: return df
     q = query.lower()
-    df = df.copy().fillna('N/A')
+    df_res = df.copy()
     
-    # Math Filters
-    pats = {'latency': r'latency\s*([<>]=?)\s*(\d+)', 'accuracy': r'accuracy\s*([<>]=?)\s*(\d+)', 'drift': r'drift\s*([<>]=?)\s*(0\.\d+|\d+)'}
-    for col, pat in pats.items():
+    # 1. Math Filters (e.g. latency < 50)
+    pats = {'latency': r'latency\s*([<>]=?)\s*(\d+)', 'accuracy': r'accuracy\s*([<>]=?)\s*(\d+)', 'drift': r'drift\s*([<>]=?)\s*(0\.\d+|\d+)', 'usage': r'usage\s*([<>]=?)\s*(\d+)'}
+    for key, pat in pats.items():
         match = re.search(pat, q)
         if match:
             op, val = match.groups()
-            val = float(val)/100 if (col=='accuracy' and float(val)>1) else float(val)
-            target = 'data_drift' if col=='drift' else col
-            if '>' in op: df = df[df[target] >= val]
-            else: df = df[df[target] <= val]
+            val = float(val)/100 if (key=='accuracy' and float(val)>1) else float(val)
+            col = 'data_drift' if key=='drift' else key
+            if '>' in op: df_res = df_res[df_res[col] >= val]
+            else: df_res = df_res[df_res[col] <= val]
 
-    if df.empty: return df
-    # Textual Search
-    df['blob'] = df.astype(str).apply(' '.join, axis=1)
+    if df_res.empty: return df_res
+    
+    # 2. Textual Similarity
+    df_res['blob'] = df_res.fillna('').astype(str).apply(' '.join, axis=1)
     vec = TfidfVectorizer(stop_words='english')
-    mtx = vec.fit_transform(df['blob'].tolist() + [query])
-    df['relevance'] = cosine_similarity(mtx[-1], mtx[:-1])[0]
-    return df[df['relevance'] > 0.01].sort_values('relevance', ascending=False)
+    mtx = vec.fit_transform(df_res['blob'].tolist() + [query])
+    df_res['relevance'] = cosine_similarity(mtx[-1], mtx[:-1])[0]
+    return df_res[df_res['relevance'] > 0.01].sort_values('relevance', ascending=False)
 
-# --- NAVIGATION ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("Model Hub 3.0")
-    view = st.radio("Discovery", ["Marketplace", "Compare Tool", "Insights & Trends", "Domain ROI", "My Portfolio", "Admin Ops"])
+    view = st.radio("Navigation", ["Marketplace", "Compare Tool", "Insights & Trends", "Domain ROI", "My Portfolio", "Admin Ops"])
     role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
     if st.session_state.basket:
-        st.success(f"Comparing {len(st.session_state.basket)} models")
+        st.success(f"Basket: {len(st.session_state.basket)} models")
         if st.button("Reset Basket"): st.session_state.basket = []; st.rerun()
 
 # --- 1. MARKETPLACE ---
 if view == "Marketplace":
     t1, t2 = st.tabs(["🏛 Model Gallery", "🚀 Ingest Asset"])
     with t1:
-        query = st.text_input("💬 Smart Search (e.g. 'Finance Prod >90 accuracy')", placeholder="Search Keywords or Logic...")
+        query = st.text_input("💬 Search Keywords or Logic (e.g. 'Finance >90 accuracy latency < 50')", placeholder="Search...")
         results = hybrid_search(query, df_master)
         for i in range(0, min(len(results), 21), 3):
             cols = st.columns(3)
@@ -118,7 +122,7 @@ if view == "Marketplace":
                         <div class="model-card">
                             <div>
                                 <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                                    <span class="registry-badge">{row.get('registry_provider','Vertex AI')}</span>
+                                    <span class="registry-badge">{row['registry_provider']}</span>
                                     <span style="color:#2E7D32; font-size:0.6rem;">● Healthy</span>
                                 </div>
                                 <div class="model-title">{row['name'][:24]}</div>
@@ -139,63 +143,57 @@ if view == "Marketplace":
                         with b2:
                             with st.popover("Specs"):
                                 st.write(f"**SHAP Summary: {row['name']}**")
-                                feats = SHAP_FEATURES.get(row['domain'], ["F1","F2","F3","F4","F5"])
+                                feats = SHAP_FEATURES.get(row['domain'], ["Feature_A","Feature_B","Feature_C","Feature_D","Feature_E"])
                                 shap_df = pd.DataFrame({'Feature': feats, 'Impact': [random.uniform(-0.5, 0.5) for _ in range(5)]}).sort_values('Impact')
                                 shap_df['Color'] = ['#EF4444' if x < 0 else '#6200EE' for x in shap_df['Impact']]
-                                fig_shap = px.bar(shap_df, x='Impact', y='Feature', orientation='h', color='Color', color_discrete_map="identity", height=180)
-                                fig_shap.update_layout(margin=dict(l=0,r=0,t=0,b=0), showlegend=False)
-                                st.plotly_chart(fig_shap, use_container_width=True, key=f"sh_{i+j}")
-                        if b3.button("Request", key=f"r_{i+j}"): 
-                            # Explicitly mark for Nat Patel
+                                fig = px.bar(shap_df, x='Impact', y='Feature', orientation='h', color='Color', color_discrete_map="identity", height=180)
+                                fig.update_layout(margin=dict(l=0,r=0,t=0,b=0), showlegend=False)
+                                st.plotly_chart(fig, use_container_width=True, key=f"sh_{i+j}")
+                        if b3.button("Request", key=f"r_{i+j}"):
                             df_master.loc[df_master['name'] == row['name'], 'approval_status'] = 'Pending'
-                            df_master.to_csv(REG_PATH, index=False)
-                            st.toast("Sent to Nat Patel")
+                            df_master.to_csv(REG_PATH, index=False); st.toast("Sent to Nat Patel")
 
     with t2:
         with st.form("ingest"):
-            st.subheader("Ingest to Hub")
-            fn = st.text_input("Asset Name*")
-            fd = st.selectbox("Business Domain", list(SHAP_FEATURES.keys()))
-            fe = st.text_area("Full Description*")
-            if st.form_submit_button("Publish Model"):
-                new = pd.DataFrame([{"name":fn,"domain":fd,"use_cases":fe,"contributor":role,"accuracy":0.85,"latency":40,"usage":10,"model_stage":"Experimental","approval_status":"Pending","data_drift":0.01,"revenue_impact":1000,"risk_exposure":500}])
+            st.subheader("Register Asset")
+            fn = st.text_input("Name*"); fd = st.selectbox("Domain", list(SHAP_FEATURES.keys())); fe = st.text_area("Description*")
+            if st.form_submit_button("Publish"):
+                new = pd.DataFrame([{"name":fn,"domain":fd,"use_cases":fe,"contributor":role,"accuracy":0.85,"latency":40,"usage":0,"model_stage":"Shadow","approval_status":"Pending"}])
                 pd.concat([df_master, new]).to_csv(REG_PATH, index=False); st.success("Asset live!")
 
 # --- 2. COMPARE TOOL ---
 elif view == "Compare Tool":
     st.header("Side-by-Side Comparison")
-    if not st.session_state.basket: st.info("Add models from the Gallery to compare them here.")
+    if not st.session_state.basket: st.info("Add models from Marketplace.")
     else:
         cdf = df_master[df_master['name'].isin(st.session_state.basket)]
-        # Precise Comparison on 4 Metrics
-        st.dataframe(cdf[['name','accuracy','data_drift','latency','usage','domain','model_stage']], use_container_width=True)
-        fig_comp = px.bar(cdf, x='name', y=['accuracy','data_drift','latency','usage'], barmode='group', title="Metric Comparison")
-        st.plotly_chart(fig_comp, use_container_width=True)
+        st.dataframe(cdf[['name','accuracy','data_drift','latency','usage','domain']], use_container_width=True)
+        st.plotly_chart(px.bar(cdf, x='name', y=['accuracy','data_drift','latency','usage'], barmode='group', title="Comparison Matrix"))
 
 # --- 3. INSIGHTS & TRENDS ---
 elif view == "Insights & Trends":
-    st.header("Hub Analytics: What's Trending")
+    st.header("Strategic "Wow" Dashboard")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.subheader("🔥 Trending Models")
-        st.table(df_master.nlargest(5, 'usage')[['name','usage','domain']])
+        st.subheader("🔥 Trending")
+        st.table(df_master.nlargest(5, 'usage')[['name','usage']])
     with c2:
         st.subheader("💎 Hidden Gems")
-        st.table(df_master[(df_master['accuracy'] > 0.95) & (df_master['usage'] < 1000)].head(5)[['name','accuracy']])
+        st.table(df_master[(df_master['accuracy'] > 0.96) & (df_master['usage'] < 1000)].head(5)[['name','accuracy']])
     with c3:
-        st.subheader("⚠️ Action Needed (High Drift)")
+        st.subheader("⚠️ High Drift Action")
         st.table(df_master.nlargest(5, 'data_drift')[['name','data_drift']])
 
 # --- 4. DOMAIN ROI ---
 elif view == "Domain ROI":
-    st.header("Strategic Business Unit Value")
+    st.header("Strategic Domain Value")
     agg = df_master.groupby('domain').agg({'revenue_impact':'sum','risk_exposure':'sum','usage':'sum','accuracy':'mean'}).reset_index()
     k1, k2 = st.columns(2)
-    k1.metric("Revenue Impact", f"${agg['revenue_impact'].sum()/1e6:.1f}M")
-    k2.metric("Total Usage", f"{int(agg['usage'].sum()):,}")
+    k1.metric("Rev Contribution", f"${agg['revenue_impact'].sum()/1e6:.1f}M")
+    k2.metric("Fleet Quality", f"{int(agg['accuracy'].mean()*100)}%")
     c1, c2 = st.columns(2)
-    with c1: st.plotly_chart(px.pie(agg, values='revenue_impact', names='domain', hole=0.4, title="Revenue Contribution"))
-    with c2: st.plotly_chart(px.bar(agg, x='domain', y='revenue_impact', color='accuracy', title="ROI vs Performance"))
+    with c1: st.plotly_chart(px.pie(agg, values='revenue_impact', names='domain', hole=0.4))
+    with c2: st.plotly_chart(px.bar(agg, x='domain', y='revenue_impact', color='accuracy'))
 
 # --- 5. MY PORTFOLIO ---
 elif view == "My Portfolio":
@@ -204,34 +202,32 @@ elif view == "My Portfolio":
         st.header(f"Contributor: {role}")
         sel = st.selectbox("Inspect Asset", my_m['name'].unique())
         m = my_m[my_m['name'] == sel].iloc[0]
-        fig_r = go.Figure(go.Scatterpolar(r=[m['accuracy']*100, 100-(m['data_drift']*100), m.get('cpu_util',50), 100-m.get('error_rate',0)*10], theta=['Accuracy','Stability','Efficiency','Reliability'], fill='toself'))
-        st.plotly_chart(fig_r, use_container_width=True)
-    else: st.info("No assets found for this user.")
+        fig = go.Figure(go.Scatterpolar(r=[m['accuracy']*100, 100-(m['data_drift']*100), m.get('cpu_util',50), 100-m.get('error_rate',0)*10], theta=['Accuracy','Stability','Efficiency','Reliability'], fill='toself'))
+        st.plotly_chart(fig, use_container_width=True)
+    else: st.info("No assets found.")
 
 # --- 6. ADMIN OPS / NAT PATEL ---
 elif view == "Admin Ops":
-    st.header("Governance Telemetry")
     if role == "Nat Patel":
-        st.subheader("Leader Approval Queue")
+        st.header("Leader Approval Gateway")
         pend = df_master[df_master['approval_status'] == 'Pending']
         if not pend.empty:
             st.dataframe(pend[['name','domain','contributor','accuracy']])
             if st.button("Bulk Approve All"):
-                df_master['approval_status'] = 'Approved'; df_master.to_csv(REG_PATH, index=False); st.rerun()
-        else: st.success("No pending approvals.")
+                df_master.loc[df_master['approval_status'] == 'Pending', 'approval_status'] = 'Approved'
+                df_master.to_csv(REG_PATH, index=False); st.rerun()
+        else: st.success("Queue clear.")
     else:
+        st.header("Fleet Governance")
         sel = st.selectbox("Focus Asset", ["None"] + list(df_master['name'].unique()))
-        # High Contrast Theme: Pale Yellow Background, Bold Red Selected
         cv = [1.0 if n == sel else 0.0 for n in df_master['name']]
-        fig_p = go.Figure(data=go.Parcoords(
+        fig = go.Figure(data=go.Parcoords(
             labelfont=dict(size=10, color='black'), tickfont=dict(size=8),
             line=dict(color=cv, colorscale=[[0, '#FFF9C4'], [1, '#B71C1C']], showscale=False),
             dimensions=[dict(range=[0.7,1], label='Accuracy', values=df_master['accuracy']),
                         dict(range=[0,150], label='Latency', values=df_master['latency']),
                         dict(range=[0,25000], label='Usage', values=df_master['usage']),
                         dict(range=[0,0.3], label='Drift', values=df_master['data_drift'])]))
-        fig_p.update_layout(margin=dict(t=80, b=40, l=80, r=80), height=500)
-        st.plotly_chart(fig_p, use_container_width=True)
-        if sel != "None":
-            st.subheader(f"Highlighted Detail: {sel}")
-            st.table(df_master[df_master['name'] == sel][['name','domain','usage','accuracy','latency','data_drift']])
+        fig.update_layout(margin=dict(t=80, b=40, l=80, r=80), height=500)
+        st.plotly_chart(fig, use_container_width=True)
+        if sel != "None": st.table(df_master[df_master['name'] == sel][['name','domain','usage','accuracy','latency','data_drift']])
