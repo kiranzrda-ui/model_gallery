@@ -152,3 +152,44 @@ if role == "Marketplace (Consumer)":
                 c_name = st.text_input("Model Name (e.g. Supply-Chain-Optim-V1)")
                 c_domain = st.selectbox("Business Domain", domains)
             with col_b:
+                c_clients = st.text_input("Clients / Projects where used")
+                c_usecase = st.text_input("Specific Problem Solved")
+            
+            c_desc = st.text_area("Full Description (Searchable keywords)")
+            
+            submitted = st.form_submit_button("Publish to Marketplace")
+            
+            if submitted:
+                if c_name and c_desc:
+                    # ADD TO THE SESSION STATE REGISTRY
+                    new_entry = {
+                        "name": c_name, "domain": c_domain, "type": "Community",
+                        "accuracy": 0.0, "latency": "TBD", "clients": c_clients,
+                        "use_cases": c_usecase, "description": c_desc, "usage": 0
+                    }
+                    st.session_state.registry = pd.concat([st.session_state.registry, pd.DataFrame([new_entry])], ignore_index=True)
+                    st.success(f"Successfully published '{c_name}'! Go to 'Unified Gallery' to see it.")
+                    # In Streamlit, this triggers a rerun, making it searchable immediately
+                else:
+                    st.error("Please provide at least a name and description.")
+
+# --- ADMIN VIEW ---
+else:
+    st.subheader("Marketplace Efficacy Dashboard")
+    
+    # KPIs
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Search Conversions", "88%", "+2%")
+    k2.metric("Community Growth", f"+{len(st.session_state.registry[st.session_state.registry['type']=='Community'])}", "This Session")
+    k3.metric("API Volume", "45.2k", "Active")
+    k4.metric("Avg Drift Score", "0.04", "-0.01")
+
+    # Visuals
+    c1, c2 = st.columns(2)
+    with c1:
+        fig = px.sunburst(st.session_state.registry, path=['type', 'domain'], values='usage', color='usage', color_continuous_scale='Purples', title="Asset Composition & Popularity")
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        top_10 = st.session_state.registry.nlargest(10, 'usage')
+        fig2 = px.scatter(top_10, x='accuracy', y='usage', size='usage', color='domain', text='name', title="Top 10 Models: Usage vs. Accuracy")
+        st.plotly_chart(fig2, use_container_width=True)
