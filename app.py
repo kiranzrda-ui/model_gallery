@@ -172,7 +172,7 @@ elif view == "Compare Tool":
 
 # --- 3. INSIGHTS & TRENDS ---
 elif view == "Insights & Trends":
-    st.header("Strategic "Wow" Dashboard")
+    st.header("Strategic Wow Dashboard")
     c1, c2, c3 = st.columns(3)
     with c1:
         st.subheader("🔥 Trending")
