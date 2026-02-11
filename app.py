@@ -10,7 +10,7 @@ import random
 import csv
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Accenture AI Marketplace | Enterprise Hub", layout="wide")
+st.set_page_config(page_title=" AI Marketplace | Enterprise Hub", layout="wide")
 
 st.markdown("""
     <style>
@@ -86,7 +86,7 @@ req_log = pd.read_csv(REQ_PATH)
 
 # --- SIDEBAR & AUTH ---
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accenture.svg/2560px-Accenture.svg.png", width=120)
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accente.svg/2560px-Accente.svg.png", width=120)
     current_user = st.selectbox("Login Profile", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
     st.divider()
     st.subheader("Performance Tiers")
