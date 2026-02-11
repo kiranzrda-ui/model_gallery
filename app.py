@@ -11,194 +11,190 @@ import random
 import re
 
 # --- CONFIG & COMPACT STYLING ---
-st.set_page_config(page_title="Model Gallery", layout="wide")
+st.set_page_config(page_title="Model Hub", layout="wide")
 
 st.markdown("""
     <style>
     :root { --accent: #6200EE; --success: #2E7D32; --warning: #F9A825; --critical: #C62828; }
-    
     .model-card {
-        border: 1px solid #e0e0e0;
-        border-top: 4px solid var(--accent);
-        padding: 15px;
-        background-color: #ffffff;
-        margin-bottom: 20px;
-        min-height: 400px;
-        border-radius: 8px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        border: 1px solid #e0e0e0; border-top: 4px solid var(--accent);
+        padding: 15px; background-color: #ffffff; margin-bottom: 20px;
+        min-height: 420px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        display: flex; flex-direction: column; justify-content: space-between;
     }
     .model-title { font-size: 1.1rem; font-weight: 700; color: #111; margin-bottom: 2px; }
     .status-pill { font-size: 0.65rem; padding: 2px 8px; border-radius: 10px; color: white; font-weight: bold; float: right; }
     .Healthy { background-color: var(--success); }
     .Warning { background-color: var(--warning); }
     .Critical { background-color: var(--critical); }
-
     .meta-table { font-size: 0.75rem; width: 100%; margin: 10px 0; border-collapse: collapse; }
     .meta-table td { padding: 4px 0; border-bottom: 1px solid #f9f9f9; }
-    .meta-label { color: #888; width: 40%; }
+    .meta-label { color: #888; width: 45%; }
     .meta-val { color: #333; font-weight: 500; text-align: right; }
-
-    .use-case-text { font-size: 0.8rem; color: #555; margin: 10px 0; line-height: 1.4; height: 50px; overflow: hidden; }
-    
+    .use-case-text { font-size: 0.8rem; color: #555; margin: 10px 0; line-height: 1.4; height: 60px; overflow: hidden; }
     .metric-grid { display: flex; justify-content: space-between; background: #fafafa; padding: 10px; border-radius: 4px; border: 1px solid #eee; }
     .metric-item { text-align: center; }
     .metric-label { font-size: 0.65rem; color: #999; display: block; text-transform: uppercase; }
-    .metric-num { font-size: 0.9rem; font-weight: 700; color: var(--accent); }
-
-    .stButton>button { background-color: #111; color: #fff; border-radius: 4px; border: none; width: 100%; height: 35px; }
+    .metric-num { font-size: 0.85rem; font-weight: 700; color: var(--accent); }
+    .stButton>button { background-color: #111; color: #fff; border-radius: 4px; border: none; width: 100%; height: 35px; font-size: 0.8rem; }
     .stButton>button:hover { background-color: var(--accent); color: #fff; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- DATA LAYER ---
+# --- PATHS & DATA ---
 REG_PATH = "model_registry_v3.csv"
 REQ_PATH = "requests_v3.csv"
 LOG_PATH = "search_efficacy_v3.csv"
 
 def init_files():
-    if not os.path.exists(REG_PATH):
-        # Initial Seed
-        pd.DataFrame(columns=[
-            "name", "model_version", "domain", "type", "accuracy", "latency", "clients", 
-            "use_cases", "contributor", "usage", "data_drift", "pred_drift", "cpu_util", 
-            "mem_util", "throughput", "error_rate", "model_owner_team", "last_retrained_date", 
-            "model_stage", "training_data_source", "approval_status", "monitoring_status", 
-            "sla_tier", "feature_store_dependency", "inference_endpoint_id"
-        ]).to_csv(REG_PATH, index=False)
+    if not os.path.exists(REQ_PATH):
+        pd.DataFrame(columns=["model_name", "requester", "status", "timestamp"]).to_csv(REQ_PATH, index=False)
+    if not os.path.exists(LOG_PATH):
+        pd.DataFrame(columns=["query", "found", "timestamp"]).to_csv(LOG_PATH, index=False)
 
 init_files()
 df_master = pd.read_csv(REG_PATH)
-req_log = pd.read_csv(REQ_PATH) if os.path.exists(REQ_PATH) else pd.DataFrame(columns=["model_name", "requester", "status", "timestamp"])
+req_log = pd.read_csv(REQ_PATH)
+search_logs = pd.read_csv(LOG_PATH)
 
-# --- SEARCH & PARSING LOGIC ---
-def natural_language_query(query, df):
-    """Filters data based on keywords and math symbols in the search bar."""
+# --- SEARCH LOGIC ---
+def process_search(query, df):
     if not query: return df
-    
-    # 1. Metric Filtering (e.g., >90 accuracy)
     q = query.lower()
+    # 1. Numerical Filtering (e.g., >90 accuracy)
     match = re.search(r'([><=]=?)\s*(\d+)', q)
     if match:
         op, val = match.groups()
         val = float(val)/100 if float(val) > 1 else float(val)
         if '>' in op: df = df[df['accuracy'] >= val]
         elif '<' in op: df = df[df['accuracy'] <= val]
-    
-    # 2. Text Search
-    df['blob'] = df.fillna('').astype(str).apply(' '.join, axis=1)
+
+    # 2. Textual Ranking
+    df_search = df.copy()
+    df_search['blob'] = df_search.fillna('').astype(str).apply(' '.join, axis=1)
     vec = TfidfVectorizer(ngram_range=(1,2), stop_words='english')
-    mtx = vec.fit_transform(df['blob'].tolist() + [query])
+    mtx = vec.fit_transform(df_search['blob'].tolist() + [query])
     scores = cosine_similarity(mtx[-1], mtx[:-1])[0]
-    df['relevance'] = scores
-    return df[df['relevance'] > 0.01].sort_values('relevance', ascending=False)
+    df_search['relevance'] = scores
+    
+    results = df_search[df_search['relevance'] > 0.01].sort_values('relevance', ascending=False)
+    
+    # Log efficacy
+    new_log = pd.DataFrame([{"query": query, "found": len(results), "timestamp": str(datetime.datetime.now())}])
+    pd.concat([search_logs, new_log]).to_csv(LOG_PATH, index=False)
+    return results
+
+# --- UI COMPONENTS ---
+def render_model_tile(row):
+    return f"""
+    <div class="model-card">
+        <div>
+            <span class="status-pill {row['monitoring_status']}">{row['monitoring_status']}</span>
+            <div class="model-title">{row['name']}</div>
+            <div class="version-tag">{row['model_version']} | {row['type']}</div>
+            <table class="meta-table">
+                <tr><td class="meta-label">Domain</td><td class="meta-val">{row['domain']}</td></tr>
+                <tr><td class="meta-label">Stage</td><td class="meta-val">{row['model_stage']}</td></tr>
+                <tr><td class="meta-label">SLA Tier</td><td class="meta-val">{row['sla_tier']}</td></tr>
+                <tr><td class="meta-label">Team</td><td class="meta-val">{row['model_owner_team']}</td></tr>
+                <tr><td class="meta-label">Source</td><td class="meta-val">{row['training_data_source']}</td></tr>
+            </table>
+            <div class="use-case-text"><b>Use Case:</b> {row['use_cases']}</div>
+        </div>
+        <div class="metric-grid">
+            <div class="metric-item"><span class="metric-label">Acc</span><span class="metric-num">{int(row['accuracy']*100)}%</span></div>
+            <div class="metric-item"><span class="metric-label">Lat</span><span class="metric-num">{row['latency']}ms</span></div>
+            <div class="metric-item"><span class="metric-label">Drift</span><span class="metric-num">{row['data_drift']}</span></div>
+        </div>
+    </div>
+    """
 
 # --- NAVIGATION ---
 with st.sidebar:
-    st.title("Settings")
-    user = st.selectbox("Switch User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
+    st.title("Hub")
+    user = st.selectbox("Role", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
 
-# --- DATA SCIENTIST VIEW ---
+# --- VIEW: DATA SCIENTIST ---
 if user in ["John Doe", "Jane Nu", "Sam King"]:
-    st.subheader("Model Gallery")
-    t1, t2, t3 = st.tabs(["Search Gallery", "Contribute", "My Assets"])
-
+    t1, t2, t3 = st.tabs(["Gallery", "Ingest", "My Portfolio"])
+    
     with t1:
-        query = st.text_input("💬 Search anything (e.g. 'Finance Prod >90 accuracy')", placeholder="Keywords or metrics...")
-        results = natural_language_query(query, df_master)
-
+        query = st.text_input("💬 Smart Search (Keywords or Metrics like '>90')", placeholder="Search...")
+        results = process_search(query, df_master)
         for i in range(0, min(len(results), 30), 3):
             cols = st.columns(3)
             for j in range(3):
                 if i+j < len(results):
                     row = results.iloc[i+j]
                     with cols[j]:
-                        # HTML string built carefully to avoid markdown parsing errors
-                        card_html = f"""
-                        <div class="model-card">
-                            <div>
-                                <span class="status-pill {row['monitoring_status']}">{row['monitoring_status']}</span>
-                                <div class="model-title">{row['name']}</div>
-                                <div class="version-tag">{row['model_version']} | {row['type']}</div>
-                                
-                                <table class="meta-table">
-                                    <tr><td class="meta-label">Domain</td><td class="meta-val">{row['domain']}</td></tr>
-                                    <tr><td class="meta-label">Stage</td><td class="meta-val">{row['model_stage']}</td></tr>
-                                    <tr><td class="meta-label">Team</td><td class="meta-val">{row['model_owner_team']}</td></tr>
-                                    <tr><td class="meta-label">SLA Tier</td><td class="meta-val">{row['sla_tier']}</td></tr>
-                                    <tr><td class="meta-label">Data Source</td><td class="meta-val">{row['training_data_source']}</td></tr>
-                                </table>
-                                
-                                <div class="use-case-text"><b>Use Case:</b> {row['use_cases']}</div>
-                            </div>
-                            
-                            <div>
-                                <div class="metric-grid">
-                                    <div class="metric-item"><span class="metric-label">Acc</span><span class="metric-num">{int(row['accuracy']*100)}%</span></div>
-                                    <div class="metric-item"><span class="metric-label">Lat</span><span class="metric-num">{row['latency']}ms</span></div>
-                                    <div class="metric-item"><span class="metric-label">Drift</span><span class="metric-num">{row['data_drift']}</span></div>
-                                </div>
-                                <div style="height:15px;"></div>
-                            </div>
-                        </div>
-                        """
-                        st.markdown(card_html, unsafe_allow_html=True)
+                        st.markdown(render_model_tile(row), unsafe_allow_html=True)
                         if st.button("Request Access", key=f"req_{i+j}_{row['name']}"):
+                            new_req = pd.DataFrame([{"model_name": row['name'], "requester": user, "status": "Pending", "timestamp": str(datetime.datetime.now())}])
+                            pd.concat([req_log, new_req]).to_csv(REQ_PATH, index=False)
                             st.toast(f"Request sent for {row['name']}")
 
     with t2:
-        st.write("### Register a New Model")
-        with st.form("ingest", clear_on_submit=True):
-            n = st.text_input("Model Name*")
+        with st.form("ingest"):
+            n = st.text_input("Name*")
             d = st.text_input("Domain")
-            desc = st.text_area("Detailed Description (Include Stage, SLA, Team info)*")
+            desc = st.text_area("Detailed Description (Keywords like 'Shadow' help tagging)*")
             if st.form_submit_button("Submit"):
-                # Basic inference from text
-                stage = "Shadow" if "shadow" in desc.lower() else "Prod"
-                new_row = pd.DataFrame([{
-                    "name": n, "model_version": "v1.0", "domain": d, "type": "Community",
-                    "accuracy": 0.85, "latency": 50, "use_cases": desc, "contributor": user,
-                    "monitoring_status": "Healthy", "model_stage": stage, "usage": 0, "data_drift": 0,
-                    "model_owner_team": "Internal", "sla_tier": "Bronze", "training_data_source": "Manual"
-                }])
-                pd.concat([df_master, new_row]).to_csv(REG_PATH, index=False)
-                st.success("Model submitted and searchable!")
+                if n and desc:
+                    new_row = pd.DataFrame([{"name": n, "model_version": "v1.0", "domain": d, "type": "Community", "accuracy": 0.85, "latency": 45, "use_cases": desc, "contributor": user, "monitoring_status": "Healthy", "model_stage": "Shadow", "usage": 0, "data_drift": 0.0, "model_owner_team": "Strategy AI", "sla_tier": "Bronze", "training_data_source": "Input", "model_owner_team": "Data Science Hub"}])
+                    pd.concat([df_master, new_row]).to_csv(REG_PATH, index=False)
+                    st.success("Ingested!")
 
     with t3:
-        st.dataframe(df_master[df_master['contributor'] == user])
+        my_m = df_master[df_master['contributor'] == user]
+        if not my_m.empty:
+            sel = st.selectbox("Inspect Asset", my_m['name'].unique())
+            m_dat = my_m[my_m['name'] == sel].iloc[0]
+            fig = go.Figure(go.Scatterpolar(r=[m_dat['accuracy']*100, 100-m_dat['data_drift']*100, 100-m_dat['cpu_util'], 100-m_dat['error_rate']*10], theta=['Accuracy','Stability','Efficiency','Reliability'], fill='toself'))
+            st.plotly_chart(fig, use_container_width=True)
+        else: st.info("No assets yet.")
 
-# --- ADMIN VIEW ---
-elif user == "Admin":
-    st.subheader("Global Metrics & Governance")
-    k1, k2 = st.columns(2)
-    k1.metric("Total Assets", len(df_master))
-    k2.metric("Total Invocations", df_master['usage'].sum())
+# --- VIEW: LEADER ---
+elif user == "Nat Patel (Leader)":
+    st.subheader("Approval Gateway")
+    # Refresh log
+    current_reqs = pd.read_csv(REQ_PATH)
+    pending = current_reqs[current_reqs['status'] == "Pending"]
+    if not pending.empty:
+        for idx, r in pending.iterrows():
+            c1, c2 = st.columns([3, 1])
+            c1.write(f"💼 **{r['requester']}** requested access to **{r['model_name']}**")
+            if c2.button("Approve", key=f"ap_{idx}"):
+                current_reqs.at[idx, 'status'] = "Approved"
+                current_reqs.to_csv(REQ_PATH, index=False)
+                st.rerun()
+    else: st.success("Queue clear.")
+
+# --- VIEW: ADMIN ---
+else:
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Global Usage", df_master['usage'].sum())
+    if len(search_logs) > 0:
+        eff = (len(search_logs[search_logs['found'] > 0]) / len(search_logs)) * 100
+        k2.metric("Search Conversion", f"{int(eff)}%")
+    k3.metric("Inventory", len(df_master))
 
     st.divider()
-    st.write("### Multi-Dimensional Performance Inspector")
+    selected_model = st.selectbox("Highlight Asset", ["None"] + list(df_master['name'].unique()))
     
-    # Selection logic for highlighting
-    selected_model = st.selectbox("Highlight Specific Asset", ["None"] + list(df_master['name'].unique()))
-    
-    plot_df = df_master.copy()
-    colors = [1.0 if name == selected_model else 0.0 for name in plot_df['name']]
+    # Theme: Pale Yellow vs Red
+    cv = [1.0 if name == selected_model else 0.0 for name in df_master['name']]
+    cs = [[0, 'rgba(255, 249, 196, 0.4)'], [1, '#B71C1C']] # Pale Yellow vs Deep Red
     
     fig = go.Figure(data=go.Parcoords(
-        labelfont=dict(size=11, color='black'), # Smaller font to fix smudging
-        tickfont=dict(size=9, color='gray'),
-        line=dict(color=colors, colorscale=[[0, 'rgba(161,0,255,0.1)'], [1, 'red']], showscale=False),
+        labelfont=dict(size=10, color='black'),
+        tickfont=dict(size=8, color='gray'),
+        line=dict(color=cv, colorscale=cs, showscale=False),
         dimensions=list([
-            dict(range=[0.7, 1.0], label='Accuracy', values=plot_df['accuracy']),
-            dict(range=[0, 200], label='Latency', values=plot_df['latency']),
-            dict(range=[0, 20000], label='Usage', values=plot_df['usage']),
-            dict(range=[0, 0.3], label='Drift', values=plot_df['data_drift']),
-            dict(range=[0, 100], label='CPU %', values=plot_df['cpu_util'])
+            dict(range=[0.7, 1.0], label='Accuracy', values=df_master['accuracy']),
+            dict(range=[0, 200], label='Latency', values=df_master['latency']),
+            dict(range=[0, 20000], label='Usage', values=df_master['usage']),
+            dict(range=[0, 0.25], label='Drift', values=df_master['data_drift'])
         ])
     ))
-    
-    fig.update_layout(margin=dict(t=80, b=40, l=50, r=50), height=450)
+    fig.update_layout(margin=dict(t=80, b=40, l=60, r=60), height=500)
     st.plotly_chart(fig, use_container_width=True)
-
-# --- LEADER VIEW ---
-else:
-    st.write("### Approval Queue")
-    st.info("No pending requests.")
