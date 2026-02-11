@@ -54,30 +54,65 @@ def init_files():
 
 init_files()
 df_master = pd.read_csv(REG_PATH)
-req_log = pd.read_csv(REQ_PATH)
 search_logs = pd.read_csv(LOG_PATH)
 
-# --- SEARCH LOGIC ---
-def process_search(query, df):
+# --- ADVANCED SEARCH ENGINE ---
+def process_intelligent_search(query, df):
     if not query: return df
-    q = query.lower()
-    # 1. Numerical Filtering (e.g., >90 accuracy)
-    match = re.search(r'([><=]=?)\s*(\d+)', q)
-    if match:
-        op, val = match.groups()
-        val = float(val)/100 if float(val) > 1 else float(val)
-        if '>' in op: df = df[df['accuracy'] >= val]
-        elif '<' in op: df = df[df['accuracy'] <= val]
-
-    # 2. Textual Ranking
-    df_search = df.copy()
-    df_search['blob'] = df_search.fillna('').astype(str).apply(' '.join, axis=1)
-    vec = TfidfVectorizer(ngram_range=(1,2), stop_words='english')
-    mtx = vec.fit_transform(df_search['blob'].tolist() + [query])
-    scores = cosine_similarity(mtx[-1], mtx[:-1])[0]
-    df_search['relevance'] = scores
     
-    results = df_search[df_search['relevance'] > 0.01].sort_values('relevance', ascending=False)
+    q = query.lower()
+    filtered_df = df.copy()
+
+    # 1. Descriptive Magnitude Parsing (Keywords to Logic)
+    logic_maps = {
+        r"low latency": filtered_df['latency'] < 40,
+        r"high latency": filtered_df['latency'] > 90,
+        r"high accuracy": filtered_df['accuracy'] > 0.95,
+        r"low accuracy": filtered_df['accuracy'] < 0.80,
+        r"usage (very )?high": filtered_df['usage'] > 10000,
+        r"low usage": filtered_df['usage'] < 1000,
+        r"high drift": filtered_df['data_drift'] > 0.1,
+        r"low drift": filtered_df['data_drift'] < 0.03,
+    }
+    for phrase, mask in logic_maps.items():
+        if re.search(phrase, q):
+            filtered_df = filtered_df[mask]
+
+    # 2. Numerical Operator Parsing (e.g., latency < 50, cpu > 80)
+    # Pattern: [column name] [operator] [value]
+    patterns = {
+        'latency': r'latency\s*([<>]=?)\s*(\d+)',
+        'accuracy': r'accuracy\s*([<>]=?)\s*(\d+)',
+        'usage': r'usage\s*([<>]=?)\s*(\d+)',
+        'cpu_util': r'cpu\s*utilization\s*([<>]=?)\s*(\d+)|cpu\s*([<>]=?)\s*(\d+)',
+        'data_drift': r'drift\s*([<>]=?)\s*(0\.\d+|\d+)'
+    }
+
+    for col, pattern in patterns.items():
+        match = re.search(pattern, q)
+        if match:
+            # Handle groups because CPU has two possible regex matches
+            groups = [g for g in match.groups() if g is not None]
+            op, val = groups[0], float(groups[1])
+            
+            # Normalize percentage for accuracy
+            if col == 'accuracy' and val > 1: val = val / 100
+            
+            if op == '<': filtered_df = filtered_df[filtered_df[col] < val]
+            elif op == '>': filtered_df = filtered_df[filtered_df[col] > val]
+            elif op == '<=': filtered_df = filtered_df[filtered_df[col] <= val]
+            elif op == '>=': filtered_df = filtered_df[filtered_df[col] >= val]
+
+    if filtered_df.empty: return filtered_df
+
+    # 3. Semantic Keyword Search (TF-IDF)
+    filtered_df['blob'] = filtered_df.fillna('').astype(str).apply(' '.join, axis=1)
+    vec = TfidfVectorizer(ngram_range=(1,2), stop_words='english')
+    mtx = vec.fit_transform(filtered_df['blob'].tolist() + [query])
+    scores = cosine_similarity(mtx[-1], mtx[:-1])[0]
+    filtered_df['relevance'] = scores
+    
+    results = filtered_df[filtered_df['relevance'] > 0.001].sort_values('relevance', ascending=False)
     
     # Log efficacy
     new_log = pd.DataFrame([{"query": query, "found": len(results), "timestamp": str(datetime.datetime.now())}])
@@ -96,31 +131,35 @@ def render_model_tile(row):
                 <tr><td class="meta-label">Domain</td><td class="meta-val">{row['domain']}</td></tr>
                 <tr><td class="meta-label">Stage</td><td class="meta-val">{row['model_stage']}</td></tr>
                 <tr><td class="meta-label">SLA Tier</td><td class="meta-val">{row['sla_tier']}</td></tr>
-                <tr><td class="meta-label">Team</td><td class="meta-val">{row['model_owner_team']}</td></tr>
-                <tr><td class="meta-label">Source</td><td class="meta-val">{row['training_data_source']}</td></tr>
+                <tr><td class="meta-label">Endpoint</td><td class="meta-val">{row['inference_endpoint_id']}</td></tr>
             </table>
-            <div class="use-case-text"><b>Use Case:</b> {row['use_cases']}</div>
+            <div class="use-case-text"><b>Case:</b> {row['use_cases']}</div>
         </div>
         <div class="metric-grid">
             <div class="metric-item"><span class="metric-label">Acc</span><span class="metric-num">{int(row['accuracy']*100)}%</span></div>
             <div class="metric-item"><span class="metric-label">Lat</span><span class="metric-num">{row['latency']}ms</span></div>
-            <div class="metric-item"><span class="metric-label">Drift</span><span class="metric-num">{row['data_drift']}</span></div>
+            <div class="metric-item"><span class="metric-label">CPU</span><span class="metric-num">{row['cpu_util']}%</span></div>
         </div>
     </div>
     """
 
 # --- NAVIGATION ---
 with st.sidebar:
-    st.title("Hub")
-    user = st.selectbox("Role", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
+    st.title("Marketplace")
+    user = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
+    st.divider()
+    st.caption("Search Examples:")
+    st.info("'latency < 50ms'\n'usage very high'\n'Finance high accuracy'\n'cpu < 30%'")
 
 # --- VIEW: DATA SCIENTIST ---
 if user in ["John Doe", "Jane Nu", "Sam King"]:
-    t1, t2, t3 = st.tabs(["Gallery", "Ingest", "My Portfolio"])
+    t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🚀 Ingest Asset", "📊 My Portfolio"])
     
     with t1:
-        query = st.text_input("💬 Smart Search (Keywords or Metrics like '>90')", placeholder="Search...")
-        results = process_search(query, df_master)
+        query = st.text_input("💬 Ask the Hub (e.g., 'Finance low latency and cpu < 50%')", placeholder="Type query...")
+        results = process_intelligent_search(query, df_master)
+        
+        st.write(f"Showing {len(results)} results")
         for i in range(0, min(len(results), 30), 3):
             cols = st.columns(3)
             for j in range(3):
@@ -129,72 +168,87 @@ if user in ["John Doe", "Jane Nu", "Sam King"]:
                     with cols[j]:
                         st.markdown(render_model_tile(row), unsafe_allow_html=True)
                         if st.button("Request Access", key=f"req_{i+j}_{row['name']}"):
+                            # Direct write to ensure Nat Patel sees it
                             new_req = pd.DataFrame([{"model_name": row['name'], "requester": user, "status": "Pending", "timestamp": str(datetime.datetime.now())}])
-                            pd.concat([req_log, new_req]).to_csv(REQ_PATH, index=False)
-                            st.toast(f"Request sent for {row['name']}")
+                            new_req.to_csv(REQ_PATH, mode='a', header=False, index=False)
+                            st.toast(f"Request for {row['name']} sent to Nat Patel.")
 
     with t2:
-        with st.form("ingest"):
-            n = st.text_input("Name*")
+        with st.form("ingest_form", clear_on_submit=True):
+            st.subheader("Asset Ingestion")
+            n = st.text_input("Model Name*")
             d = st.text_input("Domain")
-            desc = st.text_area("Detailed Description (Keywords like 'Shadow' help tagging)*")
-            if st.form_submit_button("Submit"):
+            desc = st.text_area("Detailed Use Case (Mention stage, team, hardware)*")
+            if st.form_submit_button("Publish"):
                 if n and desc:
-                    new_row = pd.DataFrame([{"name": n, "model_version": "v1.0", "domain": d, "type": "Community", "accuracy": 0.85, "latency": 45, "use_cases": desc, "contributor": user, "monitoring_status": "Healthy", "model_stage": "Shadow", "usage": 0, "data_drift": 0.0, "model_owner_team": "Strategy AI", "sla_tier": "Bronze", "training_data_source": "Input", "model_owner_team": "Data Science Hub"}])
-                    pd.concat([df_master, new_row]).to_csv(REG_PATH, index=False)
-                    st.success("Ingested!")
+                    new_row = pd.DataFrame([{
+                        "name": n, "model_version": "v1.0", "domain": d, "type": "Community",
+                        "accuracy": 0.88, "latency": 45, "use_cases": desc, "contributor": user,
+                        "monitoring_status": "Healthy", "model_stage": "Experimental", "usage": 0, "data_drift": 0.0,
+                        "cpu_util": 20, "mem_util": 4, "throughput": 100, "error_rate": 0.01,
+                        "model_owner_team": "Internal", "sla_tier": "Bronze", "training_data_source": "Manual",
+                        "inference_endpoint_id": f"ep-{random.randint(100,999)}"
+                    }])
+                    new_row.to_csv(REG_PATH, mode='a', header=False, index=False)
+                    st.success("Successfully Ingested and Persisted!")
 
     with t3:
         my_m = df_master[df_master['contributor'] == user]
         if not my_m.empty:
-            sel = st.selectbox("Inspect Asset", my_m['name'].unique())
+            sel = st.selectbox("Inspect Asset Telemetry", my_m['name'].unique())
             m_dat = my_m[my_m['name'] == sel].iloc[0]
-            fig = go.Figure(go.Scatterpolar(r=[m_dat['accuracy']*100, 100-m_dat['data_drift']*100, 100-m_dat['cpu_util'], 100-m_dat['error_rate']*10], theta=['Accuracy','Stability','Efficiency','Reliability'], fill='toself'))
+            # RADAR CHART
+            fig = go.Figure(go.Scatterpolar(
+                r=[m_dat['accuracy']*100, 100-m_dat['data_drift']*100, 100-m_dat['cpu_util'], 100-m_dat['error_rate']*10],
+                theta=['Accuracy','Stability','Efficiency','Reliability'],
+                fill='toself', line_color='#6200EE'
+            ))
+            fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False, height=450)
             st.plotly_chart(fig, use_container_width=True)
-        else: st.info("No assets yet.")
+        else: st.info("You have not contributed any assets yet.")
 
-# --- VIEW: LEADER ---
+# --- VIEW: LEADER (NAT PATEL) ---
 elif user == "Nat Patel (Leader)":
-    st.subheader("Approval Gateway")
-    # Refresh log
-    current_reqs = pd.read_csv(REQ_PATH)
-    pending = current_reqs[current_reqs['status'] == "Pending"]
-    if not pending.empty:
-        for idx, r in pending.iterrows():
-            c1, c2 = st.columns([3, 1])
-            c1.write(f"💼 **{r['requester']}** requested access to **{r['model_name']}**")
-            if c2.button("Approve", key=f"ap_{idx}"):
-                current_reqs.at[idx, 'status'] = "Approved"
-                current_reqs.to_csv(REQ_PATH, index=False)
-                st.rerun()
-    else: st.success("Queue clear.")
+    st.subheader("Leader Approval Gateway")
+    if os.path.exists(REQ_PATH):
+        req_df = pd.read_csv(REQ_PATH)
+        pending = req_df[req_df['status'] == "Pending"]
+        if not pending.empty:
+            for idx, r in pending.iterrows():
+                c1, c2 = st.columns([3, 1])
+                c1.write(f"💼 **{r['requester']}** requested **{r['model_name']}**")
+                if c2.button("Approve", key=f"ap_{idx}"):
+                    req_df.at[idx, 'status'] = "Approved"
+                    req_df.to_csv(REQ_PATH, index=False)
+                    st.rerun()
+        else: st.success("Approval queue is clear.")
 
 # --- VIEW: ADMIN ---
 else:
     k1, k2, k3 = st.columns(3)
-    k1.metric("Global Usage", df_master['usage'].sum())
-    if len(search_logs) > 0:
+    k1.metric("API Consumption", f"{df_master['usage'].sum():,}")
+    if not search_logs.empty:
         eff = (len(search_logs[search_logs['found'] > 0]) / len(search_logs)) * 100
-        k2.metric("Search Conversion", f"{int(eff)}%")
+        k2.metric("Search Efficacy", f"{int(eff)}%")
     k3.metric("Inventory", len(df_master))
 
     st.divider()
-    selected_model = st.selectbox("Highlight Asset", ["None"] + list(df_master['name'].unique()))
+    selected_model = st.selectbox("Solo Inspector (Highlight Line)", ["None"] + list(df_master['name'].unique()))
     
-    # Theme: Pale Yellow vs Red
     cv = [1.0 if name == selected_model else 0.0 for name in df_master['name']]
     cs = [[0, 'rgba(255, 249, 196, 0.4)'], [1, '#B71C1C']] # Pale Yellow vs Deep Red
     
     fig = go.Figure(data=go.Parcoords(
-        labelfont=dict(size=10, color='black'),
-        tickfont=dict(size=8, color='gray'),
+        labelfont=dict(size=11, color='black'),
+        tickfont=dict(size=9, color='#666'),
         line=dict(color=cv, colorscale=cs, showscale=False),
         dimensions=list([
             dict(range=[0.7, 1.0], label='Accuracy', values=df_master['accuracy']),
             dict(range=[0, 200], label='Latency', values=df_master['latency']),
-            dict(range=[0, 20000], label='Usage', values=df_master['usage']),
+            dict(range=[0, 25000], label='Usage', values=df_master['usage']),
+            dict(range=[0, 100], label='CPU %', values=df_master['cpu_util']),
             dict(range=[0, 0.25], label='Drift', values=df_master['data_drift'])
         ])
     ))
-    fig.update_layout(margin=dict(t=80, b=40, l=60, r=60), height=500)
+    fig.update_layout(margin=dict(t=80, b=40, l=70, r=70), height=500)
     st.plotly_chart(fig, use_container_width=True)
