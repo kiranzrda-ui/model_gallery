@@ -8,222 +8,209 @@ import os
 import datetime
 import random
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="Accenture AI Marketplace | Telemetry", layout="wide")
+# --- CONFIG & STYLING ---
+st.set_page_config(page_title="Accenture AI Marketplace", layout="wide")
 
-# CUSTOM CSS
 st.markdown("""
     <style>
-    :root { --accent-purple: #A100FF; --light-purple: #F3E5F5; --success-green: #2E7D32; --warning-orange: #EF6C00; --error-red: #C62828; }
-    span[data-baseweb="tag"] { background-color: var(--light-purple) !important; color: var(--accent-purple) !important; }
+    :root { --accent: #A100FF; --light: #F3E5F5; }
+    span[data-baseweb="tag"] { background-color: var(--light) !important; color: var(--accent) !important; }
     
     .model-card {
-        border: 1px solid #e0e0e0; border-top: 3px solid var(--accent-purple);
-        padding: 12px; background-color: #ffffff; margin-bottom: 10px;
-        min-height: 320px; display: flex; flex-direction: column; justify-content: space-between;
-        border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        border: 1px solid #e0e0e0; border-top: 4px solid var(--accent);
+        padding: 12px; background-color: #ffffff; margin-bottom: 15px;
+        min-height: 380px; display: flex; flex-direction: column; justify-content: space-between;
+        border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
-    .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
-    .dot-green { background-color: var(--success-green); }
-    .dot-yellow { background-color: var(--warning-orange); }
-    .dot-red { background-color: var(--error-red); }
+    .model-title { font-size: 1.05rem; font-weight: 700; color: #000; margin-bottom: 2px; }
+    .client-tag { font-size: 0.7rem; color: var(--accent); font-weight: 600; margin-bottom: 8px; }
+    .model-desc { font-size: 0.8rem; color: #444; line-height: 1.3; margin-bottom: 10px; 
+                  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     
-    .model-title { font-size: 1rem; font-weight: 700; color: #000; margin: 4px 0; }
-    .compact-metrics { display: flex; justify-content: space-between; background: #f8f9fa; padding: 6px; border-radius: 4px; font-size: 0.7rem; margin-top: 5px; }
-    .telemetry-tag { font-size: 0.65rem; color: #666; font-family: monospace; }
+    .metric-box { background: #f8f9fa; padding: 8px; border-radius: 4px; display: flex; justify-content: space-between; font-size: 0.75rem; }
+    .status-indicator { height: 8px; width: 8px; border-radius: 50%; display: inline-block; }
     
-    .stButton>button { background-color: #000; color: white; border-radius: 0px; font-size: 0.75rem; width: 100%; }
-    .stButton>button:hover { background-color: var(--accent-purple); }
+    .stButton>button { background-color: #000; color: #fff; border-radius: 0; font-size: 0.8rem; height: 35px; width: 100%; }
+    .stButton>button:hover { background-color: var(--accent); }
     </style>
     """, unsafe_allow_html=True)
 
-# --- PERSISTENCE LAYER ---
-REG_PATH = "model_registry_v2.csv"
-REQ_PATH = "requests_v2.csv"
+# --- PERSISTENCE ---
+REG_PATH = "model_registry_v3.csv"
+LOG_PATH = "search_efficacy_logs.csv"
+REQ_PATH = "requests_v3.csv"
 
-def init_data():
+def init_files():
     if not os.path.exists(REG_PATH):
+        # Generate varied data if file doesn't exist
+        doms = ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Legal", "Marketing"]
+        cls = ["Apple", "NASA", "Amazon", "Coca-Cola", "BMW", "Samsung", "Walmart"]
         data = []
-        doms = ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Legal"]
-        users = ["John Doe", "Jane Nu", "Sam King"]
-        for i in range(45):
-            drift = round(random.uniform(0, 0.15), 3)
+        for i in range(55):
+            d = random.choice(doms)
+            acc = random.uniform(0.70, 0.99)
+            lat = random.randint(20, 100)
             data.append({
-                "name": f"{random.choice(doms)}-{i+100}", "domain": random.choice(doms),
-                "type": "Official" if i < 15 else "Community", "accuracy": random.choice([0.99, 0.92, 0.75]),
-                "latency": random.choice([30, 50, 80]), "contributor": "System" if i < 15 else random.choice(users),
-                "usage": random.randint(500, 10000), "description": "Enterprise-scale predictive asset.",
-                "data_drift": drift, "pred_drift": round(drift * 1.2, 3),
-                "cpu_util": random.randint(10, 80), "mem_util": random.randint(2, 16),
-                "throughput": random.randint(50, 1000), "error_rate": round(random.uniform(0, 2), 2)
+                "name": f"{d}-Engine-{i+100}", "domain": d, "type": "Official" if i < 20 else "Community",
+                "accuracy": round(acc, 2), "latency": lat, "clients": f"{random.choice(cls)}, {random.choice(cls)}",
+                "use_cases": f"Scalable {d} Automation", "description": f"Advanced {d} neural network optimized for high-volume enterprise workloads and low-latency inference.",
+                "contributor": random.choice(["John Doe", "Jane Nu", "Sam King"]) if i >= 20 else "System",
+                "usage": random.randint(100, 10000), "data_drift": round(random.uniform(0, 0.15), 3),
+                "cpu_util": random.randint(20, 90), "mem_util": random.randint(4, 32), "throughput": random.randint(100, 2000), "error_rate": round(random.uniform(0, 5), 2)
             })
         pd.DataFrame(data).to_csv(REG_PATH, index=False)
-    if not os.path.exists(REQ_PATH):
-        pd.DataFrame(columns=["model_name", "requester", "status", "timestamp"]).to_csv(REQ_PATH, index=False)
+    if not os.path.exists(LOG_PATH): pd.DataFrame(columns=["query", "results_found", "timestamp"]).to_csv(LOG_PATH, index=False)
+    if not os.path.exists(REQ_PATH): pd.DataFrame(columns=["model_name", "requester", "status", "timestamp"]).to_csv(REQ_PATH, index=False)
 
-init_data()
-registry = pd.read_csv(REG_PATH)
-requests = pd.read_csv(REQ_PATH)
+init_files()
+df = pd.read_csv(REG_PATH)
+search_logs = pd.read_csv(LOG_PATH)
+requests_log = pd.read_csv(REQ_PATH)
 
-# --- SIDEBAR FILTERS ---
+# --- AUTH ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accenture.svg/2560px-Accenture.svg.png", width=120)
-    user_role = st.selectbox("Identity Switch", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
+    user = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
     st.divider()
-    st.subheader("Filter Performance")
-    acc_sel = st.multiselect("Accuracy", ["High (>98%)", "Medium (80-97%)", "Low (<80%)"], default=["High (>98%)", "Medium (80-97%)"])
-    lat_sel = st.multiselect("Latency", ["Low (<40ms)", "Med (41-60ms)", "High (>60ms)"], default=["Low (<40ms)", "Med (41-60ms)", "High (>60ms)"])
+    st.subheader("Performance Filters")
+    acc_filter = st.multiselect("Accuracy Class", ["High (>98%)", "Medium (80-97%)", "Low (<80%)"], default=["High (>98%)", "Medium (80-97%)"])
+    lat_filter = st.multiselect("Latency Class", ["Low (<40ms)", "Med (41-60ms)", "High (>60ms)"], default=["Low (<40ms)", "Med (41-60ms)", "High (>60ms)"])
 
-# Filter Logic
-def apply_logic(df):
-    mask = pd.Series([False] * len(df), index=df.index)
-    if "High (>98%)" in acc_sel: mask |= (df['accuracy'] >= 0.98)
-    if "Medium (80-97%)" in acc_sel: mask |= (df['accuracy'] >= 0.80) & (df['accuracy'] < 0.98)
-    if "Low (<80%)" in acc_sel: mask |= (df['accuracy'] < 0.80)
-    df = df[mask]
+def apply_filters(input_df):
+    m = pd.Series([False] * len(input_df), index=input_df.index)
+    if "High (>98%)" in acc_filter: m |= (input_df['accuracy'] >= 0.98)
+    if "Medium (80-97%)" in acc_filter: m |= (input_df['accuracy'] >= 0.80) & (input_df['accuracy'] < 0.98)
+    if "Low (<80%)" in acc_filter: m |= (input_df['accuracy'] < 0.80)
+    input_df = input_df[m]
     
-    mask_lat = pd.Series([False] * len(df), index=df.index)
-    if "Low (<40ms)" in lat_sel: mask_lat |= (df['latency'] < 40)
-    if "Med (41-60ms)" in lat_sel: mask_lat |= (df['latency'] >= 41) & (df['latency'] <= 60)
-    if "High (>60ms)" in lat_sel: mask_lat |= (df['latency'] > 60)
-    return df[mask_lat]
+    m_lat = pd.Series([False] * len(input_df), index=input_df.index)
+    if "Low (<40ms)" in lat_filter: m_lat |= (input_df['latency'] < 40)
+    if "Med (41-60ms)" in lat_filter: m_lat |= (input_df['latency'] >= 41) & (input_df['latency'] <= 60)
+    if "High (>60ms)" in lat_filter: m_lat |= (input_df['latency'] > 60)
+    return input_df[m_lat]
 
-# --- UI LOGIC ---
+# --- SEARCH LOGIC ---
+def run_search(query, search_df):
+    if not query: return search_df
+    search_df['blob'] = search_df.astype(str).apply(' '.join, axis=1)
+    vec = TfidfVectorizer(stop_words='english')
+    mtx = vec.fit_transform(search_df['blob'].tolist() + [query])
+    scores = cosine_similarity(mtx[-1], mtx[:-1])[0]
+    search_df['score'] = scores
+    results = search_df[search_df['score'] > 0.05].sort_values('score', ascending=False)
+    
+    # Log Efficacy
+    new_log = pd.DataFrame([{"query": query, "results_found": len(results), "timestamp": str(datetime.datetime.now())}])
+    pd.concat([search_logs, new_log]).to_csv(LOG_PATH, index=False)
+    return results
 
-if user_role in ["John Doe", "Jane Nu", "Sam King"]:
-    st.title(f"Marketplace Hub | {user_role}")
-    t_gal, t_con, t_my = st.tabs(["🏛 Unified Gallery", "🚀 Ingest Model", "📊 My Portfolio"])
-
-    with t_gal:
-        q = st.text_input("🔍 Search by task, client, or keyword...", placeholder="e.g. 'Finance' or 'Drift < 0.05'")
-        display_df = apply_logic(registry)
-        if q:
-            display_df['blob'] = display_df.astype(str).apply(' '.join, axis=1)
-            vectorizer = TfidfVectorizer(stop_words='english')
-            matrix = vectorizer.fit_transform(display_df['blob'].tolist() + [q])
-            display_df['score'] = cosine_similarity(matrix[-1], matrix[:-1])[0]
-            display_df = display_df[display_df['score'] > 0].sort_values('score', ascending=False)
-
-        # 3-Column Grid
+# --- UI VIEWS ---
+if user in ["John Doe", "Jane Nu", "Sam King"]:
+    st.title(f"Marketplace Hub | {user}")
+    t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🚀 Ingest Model", "👤 My Dashboard"])
+    
+    with t1:
+        q = st.text_input("💬 Open Search: Ask for any model, client, or use-case...", placeholder="e.g. 'NASA high accuracy' or 'Supply chain FedEx'")
+        display_df = run_search(q, apply_filters(df))
+        
         for i in range(0, len(display_df), 3):
             cols = st.columns(3)
             for j in range(3):
                 if i+j < len(display_df):
                     row = display_df.iloc[i+j]
-                    drift_status = "dot-green" if row['data_drift'] < 0.05 else "dot-yellow" if row['data_drift'] < 0.1 else "dot-red"
+                    drift_color = "#2E7D32" if row['data_drift'] < 0.05 else "#EF6C00"
                     with cols[j]:
                         st.markdown(f"""
                         <div class="model-card">
                             <div>
-                                <div style="display:flex; justify-content:space-between;">
-                                    <span class="domain-tag">{row['domain']}</span>
-                                    <span class="status-dot {drift_status}" title="Health Status"></span>
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="font-size:0.65rem; color:#666;">{row['domain']}</span>
+                                    <span class="status-indicator" style="background:{drift_color};"></span>
                                 </div>
                                 <div class="model-title">{row['name']}</div>
-                                <div class="telemetry-tag">⚡ Drift: {row['data_drift']} | 📈 Err: {row['error_rate']}%</div>
+                                <div class="client-tag">Clients: {row['clients']}</div>
                                 <div class="model-desc">{row['description']}</div>
                             </div>
                             <div>
-                                <div class="compact-metrics">
+                                <div class="metric-box">
                                     <span><b>ACC:</b> {int(row['accuracy']*100)}%</span>
                                     <span><b>LAT:</b> {row['latency']}ms</span>
-                                    <span><b>TPUT:</b> {row['throughput']}/s</span>
+                                    <span><b>USE:</b> {row['usage']}</span>
                                 </div>
                                 <div style="height:10px;"></div>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-                        if st.button("Request Access", key=f"req_{row['name']}"):
-                            new_req = pd.DataFrame([{"model_name": row['name'], "requester": user_role, "status": "Pending", "timestamp": str(datetime.datetime.now())}])
-                            pd.concat([requests, new_req]).to_csv(REQ_PATH, index=False)
-                            st.toast("Request Sent to Nat Patel")
+                        if st.button("Request Access", key=f"r_{row['name']}"):
+                            n_req = pd.DataFrame([{"model_name": row['name'], "requester": user, "status": "Pending", "timestamp": str(datetime.datetime.now())}])
+                            pd.concat([requests_log, n_req]).to_csv(REQ_PATH, index=False)
+                            st.toast("Request Sent!")
 
-    with t_con:
-        with st.form("ingest_form", clear_on_submit=True):
-            st.subheader("Model Metadata Ingestion")
+    with t2:
+        with st.form("ingest"):
+            st.subheader("Model Metadata Contribution")
             c1, c2 = st.columns(2)
-            n = c1.text_input("Model Name")
-            d = c2.selectbox("Domain", ["Finance", "HR", "Supply Chain", "IT", "Legal"])
-            desc = st.text_area("Functionality Description")
-            st.divider()
-            st.caption("Runtime Simulation (Auto-generated for prototype)")
-            if st.form_submit_button("Publish to Marketplace"):
-                new_m = pd.DataFrame([{
-                    "name": n, "domain": d, "type": "Community", "accuracy": 0.85, "latency": 45,
-                    "contributor": user_role, "usage": 0, "description": desc,
-                    "data_drift": 0.02, "pred_drift": 0.02, "cpu_util": 30, "mem_util": 4,
-                    "throughput": 100, "error_rate": 0.05
-                }])
-                pd.concat([registry, new_m]).to_csv(REG_PATH, index=False)
-                st.success("Asset Ingested Successfully")
+            n_name = c1.text_input("Name")
+            n_dom = c2.selectbox("Domain", ["Finance", "HR", "Supply Chain", "IT", "Legal"])
+            n_clients = st.text_input("Clients (Comma separated)")
+            n_desc = st.text_area("Full Description")
+            if st.form_submit_button("Publish"):
+                new_row = pd.DataFrame([{"name": n_name, "domain": n_dom, "type": "Community", "accuracy": 0.90, "latency": 40, "clients": n_clients, "description": n_desc, "contributor": user, "usage": 0, "data_drift": 0.01, "cpu_util": 20, "mem_util": 8, "throughput": 500, "error_rate": 0.1}])
+                pd.concat([df, new_row]).to_csv(REG_PATH, index=False)
+                st.success("Ingested!")
 
-    with t_my:
-        my_mods = registry[registry['contributor'] == user_role]
-        if not my_mods.empty:
-            st.subheader("Live Telemetry: Your Assets")
-            selected_mod = st.selectbox("Select Model to Inspect", my_mods['name'])
-            m_data = my_mods[my_mods['name'] == selected_mod].iloc[0]
-            
-            col_a, col_b = st.columns([1, 2])
+    with t3:
+        my_m = df[df['contributor'] == user]
+        if not my_m.empty:
+            st.subheader("Your Impact & Telemetry")
+            sel = st.selectbox("Inspect Model", my_m['name'])
+            m_dat = my_m[my_m['name'] == sel].iloc[0]
+            col_a, col_b = st.columns(2)
             with col_a:
-                # Wow Factor 1: Radar Chart
-                fig = go.Figure()
-                fig.add_trace(go.Scatterpolar(
-                    r=[m_data['accuracy']*100, 100-(m_data['data_drift']*100), 100-m_data['cpu_util'], 100-m_data['error_rate']*10],
-                    theta=['Accuracy', 'Data Stability', 'CPU Efficiency', 'Reliability'],
-                    fill='toself', name=selected_mod, line_color='#A100FF'
-                ))
-                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False, title="Health Radar")
-                st.plotly_chart(fig, use_container_width=True)
-            
+                fig_radar = go.Figure(go.Scatterpolar(r=[m_dat['accuracy']*100, 100-m_dat['data_drift']*100, 100-m_dat['cpu_util'], 100-m_dat['error_rate']*10], theta=['Accuracy', 'Stability', 'Efficiency', 'Reliability'], fill='toself', line_color='#A100FF'))
+                st.plotly_chart(fig_radar, use_container_width=True)
             with col_b:
-                # Wow Factor 2: Resource Gauges
-                g1, g2 = st.columns(2)
-                with g1:
-                    fig_g = go.Figure(go.Indicator(mode="gauge+number", value=m_data['cpu_util'], title={'text': "CPU %"}, gauge={'bar': {'color': "#A100FF"}}))
-                    fig_g.update_layout(height=250)
-                    st.plotly_chart(fig_g, use_container_width=True)
-                with g2:
-                    fig_g2 = go.Figure(go.Indicator(mode="gauge+number", value=m_data['throughput'], title={'text': "Req/Sec"}, gauge={'bar': {'color': "#000000"}}))
-                    fig_g2.update_layout(height=250)
-                    st.plotly_chart(fig_g2, use_container_width=True)
+                st.metric("Total Usage", m_dat['usage'])
+                st.metric("Inference Throughput", f"{m_dat['throughput']} req/s")
         else:
-            st.info("No models found in your portfolio.")
+            st.info("No contributions yet.")
 
-elif user_role == "Nat Patel (Leader)":
-    st.title("Approval Gateway | Nat Patel")
-    st.markdown("---")
-    pending = requests[requests['status'] == "Pending"]
-    if not pending.empty:
-        for idx, row in pending.iterrows():
-            with st.container():
-                c1, c2, c3 = st.columns([3, 2, 1])
-                c1.write(f"💼 **{row['requester']}** requested **{row['model_name']}**")
-                c2.write(f"🕒 {row['timestamp'][:16]}")
-                if c3.button("Approve", key=f"app_{idx}"):
-                    requests.at[idx, 'status'] = "Approved"
-                    requests.to_csv(REQ_PATH, index=False)
-                    st.rerun()
-    else:
-        st.success("Approval queue is empty.")
+elif user == "Nat Patel (Leader)":
+    st.title("Approval Gateway")
+    pend = requests_log[requests_log['status'] == "Pending"]
+    st.dataframe(pend, use_container_width=True)
+    for idx, r in pend.iterrows():
+        if st.button(f"Approve {r['requester']} for {r['model_name']}"):
+            requests_log.at[idx, 'status'] = "Approved"
+            requests_log.to_csv(REQ_PATH, index=False)
+            st.rerun()
 
-else: # ADMIN VIEW
-    st.title("Enterprise Governance Dashboard")
-    st.markdown("---")
+else: # ADMIN
+    st.title("Marketplace Governance Dashboard")
     
-    # Wow Factor 3: High-dimensional Analysis
-    st.subheader("Global Model Portfolio Analysis")
-    fig = px.parallel_coordinates(registry, color="accuracy", 
-                             dimensions=['accuracy', 'latency', 'data_drift', 'cpu_util', 'usage'],
-                             color_continuous_scale=px.colors.sequential.Purples)
-    st.plotly_chart(fig, use_container_width=True)
+    # METRICS ROW
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Total Model Usage", df['usage'].sum())
+    # Search Efficacy: % of searches that returned results
+    if len(search_logs) > 0:
+        eff = (len(search_logs[search_logs['results_found'] > 0]) / len(search_logs)) * 100
+        k2.metric("Search Efficacy", f"{int(eff)}%")
+    k3.metric("Pending Approvals", len(requests_log[requests_log['status'] == "Pending"]))
+
+    # WOW CHART: Interactive Parallel Coordinates
+    st.subheader("Interactive Portfolio Inspector")
+    st.write("Highlight a line to see details. High Accuracy models are Purple.")
     
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("System Resource Heatmap")
-        fig_heat = px.density_heatmap(registry, x="cpu_util", y="mem_util", z="usage", 
-                                     color_continuous_scale="Purples", title="Compute vs Popularity")
-        st.plotly_chart(fig_heat, use_container_width=True)
-    with c2:
-        st.subheader("Audit Logs")
-        st.dataframe(requests.sort_values('timestamp', ascending=False), use_container_width=True)
+    # Create a numeric ID for the Parallel Coordinates mapping
+    df_plot = df.copy()
+    df_plot['id'] = range(len(df_plot))
+    
+    fig_para = px.parallel_coordinates(df_plot, 
+                                      color="accuracy",
+                                      dimensions=['accuracy', 'latency', 'usage', 'data_drift', 'cpu_util'],
+                                      color_continuous_scale=px.colors.sequential.Purples)
+    st.plotly_chart(fig_para, use_container_width=True)
+    
+    # Table to allow "Highlighting" specific models from the plot
+    st.subheader("Model Drill-down")
+    st.dataframe(df[['name', 'domain', 'usage', 'accuracy', 'latency', 'data_drift', 'contributor']])
