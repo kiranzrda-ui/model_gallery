@@ -147,4 +147,38 @@ if role == "Data Scientist":
     with tab2:
         st.subheader("Experimental & Community Models")
         comm_df = st.session_state.registry[st.session_state.registry['type'] == 'Community']
-        st
+        st.dataframe(comm_df[['name', 'domain', 'use_cases', 'description']], use_container_width=True)
+
+    with tab3:
+        st.subheader("Submit Your Model")
+        with st.form("contribution_form"):
+            new_name = st.text_input("Model Name")
+            new_domain = st.selectbox("Domain", ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Marketing", "Legal"])
+            new_desc = st.text_area("What does it do? (Be descriptive for search indexing)")
+            new_use = st.text_input("Primary Use Case")
+            submitted = st.form_submit_button("Publish Model")
+            if submitted:
+                new_row = {"name": new_name, "domain": new_domain, "type": "Community", "accuracy": 0.0, "latency": "N/A", "clients": "Internal", "use_cases": new_use, "description": new_desc, "usage": 0}
+                st.session_state.registry = pd.concat([st.session_state.registry, pd.DataFrame([new_row])], ignore_index=True)
+                st.success("Model submitted to Community Hub!")
+
+# --- ADMIN VIEW ---
+else:
+    st.header("Admin Governance Dashboard")
+    
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    col_m1.metric("Total Models", len(st.session_state.registry))
+    col_m2.metric("Official Asset Value", "$4.2M")
+    col_m3.metric("Avg Search Success", "92%")
+    col_m4.metric("Community Assets", len(st.session_state.registry[st.session_state.registry['type']=='Community']))
+
+    c1, c2 = st.columns(2)
+    with c1:
+        fig1 = px.bar(st.session_state.registry, x='domain', y='usage', color='domain', title="Consumption by Business Unit", color_discrete_sequence=px.colors.sequential.Purples_r)
+        st.plotly_chart(fig1, use_container_width=True)
+    with c2:
+        fig2 = px.box(st.session_state.registry, x='domain', y='accuracy', title="Model Accuracy Distribution", color_discrete_sequence=['#A100FF'])
+        st.plotly_chart(fig2, use_container_width=True)
+
+    st.subheader("Model Inventory Audit Log")
+    st.table(st.session_state.registry[['name', 'domain', 'type', 'usage']].sort_values(by='usage', ascending=False).head(10))
