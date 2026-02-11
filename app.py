@@ -19,7 +19,7 @@ st.markdown("""
     .model-card {
         border: 1px solid #e0e0e0; border-top: 4px solid var(--accent);
         padding: 12px; background-color: #ffffff; margin-bottom: 15px;
-        min-height: 350px; display: flex; flex-direction: column; justify-content: space-between;
+        min-height: 380px; display: flex; flex-direction: column; justify-content: space-between;
         border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
     .model-title { font-size: 1rem; font-weight: 700; color: #000; margin-bottom: 2px; }
@@ -35,9 +35,9 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- PERSISTENCE ---
-REG_PATH = "model_registry_v4.csv"
-LOG_PATH = "search_logs_v4.csv"
-REQ_PATH = "requests_v4.csv"
+REG_PATH = "model_registry_final.csv"
+LOG_PATH = "search_logs_final.csv"
+REQ_PATH = "requests_final.csv"
 
 def init_files():
     if not os.path.exists(REG_PATH):
@@ -46,12 +46,11 @@ def init_files():
         data = []
         for i in range(60):
             d = random.choice(doms)
-            acc = random.uniform(0.75, 0.99)
-            lat = random.randint(15, 120)
             data.append({
                 "name": f"{d}-Asset-{i+100}", "domain": d, "type": "Official" if i < 20 else "Community",
-                "accuracy": round(acc, 3), "latency": lat, "clients": random.choice(cls),
-                "use_cases": f"Scalable {d} processing", "description": f"Proprietary {d} architecture designed for high-concurrency enterprise workloads. Optimized for P99 latency and cross-domain data drift resilience.",
+                "accuracy": round(random.uniform(0.75, 0.99), 3), "latency": random.randint(15, 120),
+                "clients": random.choice(cls), "use_cases": f"Scalable {d} processing",
+                "description": f"Proprietary {d} architecture designed for high-concurrency enterprise workloads. Optimized for P99 latency and cross-domain data drift resilience.",
                 "contributor": random.choice(["John Doe", "Jane Nu", "Sam King"]) if i >= 20 else "System",
                 "usage": random.randint(100, 15000), "data_drift": round(random.uniform(0, 0.20), 3),
                 "cpu_util": random.randint(10, 95), "mem_util": random.randint(4, 64), "throughput": random.randint(50, 2500), "error_rate": round(random.uniform(0, 4), 2)
@@ -65,12 +64,11 @@ df = pd.read_csv(REG_PATH)
 search_logs = pd.read_csv(LOG_PATH)
 req_log = pd.read_csv(REQ_PATH)
 
-# --- SIDEBAR & AUTH ---
+# --- SIDEBAR & FILTERS ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accenture.svg/2560px-Accenture.svg.png", width=120)
     user_role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
     st.divider()
-    st.subheader("Decision Filters")
     acc_sel = st.multiselect("Accuracy", ["High (>98%)", "Medium (80-97%)", "Low (<80%)"], default=["High (>98%)", "Medium (80-97%)"])
     lat_sel = st.multiselect("Latency", ["Low (<40ms)", "Med (41-60ms)", "High (>60ms)"], default=["Low (<40ms)", "Med (41-60ms)", "High (>60ms)"])
 
@@ -90,10 +88,10 @@ def filter_registry(input_df):
 # --- CONSUMER VIEW ---
 if user_role in ["John Doe", "Jane Nu", "Sam King"]:
     st.title(f"Consumer Marketplace | {user_role}")
-    t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🚀 Contribute", "📊 My Impact"])
+    t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🚀 Contribute", "📊 My Impact Dashboard"])
     
     with t1:
-        q = st.text_input("💬 Chat Search: Find by client, task, or performance (e.g. 'NASA high accuracy')", placeholder="e.g. 'Supply Chain'")
+        q = st.text_input("💬 Search for models, clients, or tasks...", placeholder="e.g. 'NASA high accuracy'")
         display_df = filter_registry(df)
         if q:
             display_df['blob'] = display_df.astype(str).apply(' '.join, axis=1)
@@ -101,7 +99,6 @@ if user_role in ["John Doe", "Jane Nu", "Sam King"]:
             mtx = vec.fit_transform(display_df['blob'].tolist() + [q])
             display_df['score'] = cosine_similarity(mtx[-1], mtx[:-1])[0]
             display_df = display_df[display_df['score'] > 0.05].sort_values('score', ascending=False)
-            # Log Search Efficacy
             new_log = pd.DataFrame([{"query": q, "found": len(display_df), "timestamp": str(datetime.datetime.now())}])
             pd.concat([search_logs, new_log]).to_csv(LOG_PATH, index=False)
 
@@ -121,13 +118,10 @@ if user_role in ["John Doe", "Jane Nu", "Sam King"]:
                                 <div class="client-tag">Clients: {row['clients']}</div>
                                 <div class="model-desc">{row['description']}</div>
                             </div>
-                            <div>
-                                <div class="metric-box">
-                                    <span><b>ACC:</b> {int(row['accuracy']*100)}%</span>
-                                    <span><b>LAT:</b> {row['latency']}ms</span>
-                                    <span><b>DRIFT:</b> {row['data_drift']}</span>
-                                </div>
-                                <div style="height:8px;"></div>
+                            <div class="metric-box">
+                                <span><b>ACC:</b> {int(row['accuracy']*100)}%</span>
+                                <span><b>LAT:</b> {row['latency']}ms</span>
+                                <span><b>DRIFT:</b> {row['data_drift']}</span>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
@@ -138,7 +132,7 @@ if user_role in ["John Doe", "Jane Nu", "Sam King"]:
 
     with t2:
         with st.form("ingest_form", clear_on_submit=True):
-            st.subheader("Model Metadata Ingestion")
+            st.subheader("Ingest New Asset")
             c1, c2 = st.columns(2)
             in_name = c1.text_input("Model Name")
             in_dom = c2.selectbox("Domain", ["Finance", "HR", "Supply Chain", "IT", "Legal"])
@@ -150,12 +144,27 @@ if user_role in ["John Doe", "Jane Nu", "Sam King"]:
                 st.success("Successfully Ingested")
 
     with t3:
+        # Restore the Spider/Radar Plot
         my_m = df[df['contributor'] == user_role]
         if not my_m.empty:
-            st.metric("Total Views of Your Assets", my_m['usage'].sum())
-            st.dataframe(my_m[['name', 'domain', 'accuracy', 'latency', 'usage']], use_container_width=True)
+            st.subheader("Live Telemetry: Your Assets")
+            sel_m = st.selectbox("Select Model to Inspect", my_m['name'])
+            m_dat = my_m[my_m['name'] == sel_m].iloc[0]
+            
+            c_radar, c_metrics = st.columns([2, 1])
+            with c_radar:
+                fig_radar = go.Figure(go.Scatterpolar(
+                    r=[m_dat['accuracy']*100, 100-m_dat['data_drift']*100, 100-m_dat['cpu_util'], 100-m_dat['error_rate']*10],
+                    theta=['Accuracy', 'Data Stability', 'Efficiency', 'Reliability'],
+                    fill='toself', line_color='#A100FF'
+                ))
+                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
+                st.plotly_chart(fig_radar, use_container_width=True)
+            with c_metrics:
+                st.metric("Total Views", m_dat['usage'])
+                st.metric("Throughput", f"{m_dat['throughput']} req/s")
         else:
-            st.info("No contributions yet.")
+            st.info("No models found in your portfolio.")
 
 # --- LEADER VIEW ---
 elif user_role == "Nat Patel (Leader)":
@@ -163,7 +172,7 @@ elif user_role == "Nat Patel (Leader)":
     pend = req_log[req_log['status'] == "Pending"]
     if not pend.empty:
         for idx, r in pend.iterrows():
-            st.write(f"**{r['requester']}** wants access to **{r['model_name']}**")
+            st.write(f"**{r['requester']}** requested **{r['model_name']}**")
             if st.button("Approve", key=f"ap_{idx}"):
                 req_log.at[idx, 'status'] = "Approved"
                 req_log.to_csv(REQ_PATH, index=False)
@@ -183,12 +192,11 @@ else:
         k2.metric("Search Efficacy", f"{int(hit_rate)}%")
     k3.metric("Inventory Size", len(df))
 
-    # INTERACTIVE PARALLEL PLOT WITH SEARCH & HIGHLIGHT
+    # FIXED INTERACTIVE PARALLEL PLOT
     st.divider()
     st.subheader("Interactive Portfolio Inspector")
     
-    # 1. Search to Filter Plot
-    admin_q = st.text_input("🔍 Search to filter the lines in the plot below...", placeholder="e.g. 'Finance' or 'NASA'")
+    admin_q = st.text_input("🔍 Search to filter plot lines...", placeholder="e.g. 'NASA'")
     plot_df = df.copy()
     if admin_q:
         plot_df['blob'] = plot_df.astype(str).apply(' '.join, axis=1)
@@ -197,40 +205,26 @@ else:
         plot_df['score'] = cosine_similarity(m[-1], m[:-1])[0]
         plot_df = plot_df[plot_df['score'] > 0.05]
     
-    # 2. Dropdown to Highlight specific model
-    highlight_name = st.selectbox("🎯 Highlight a specific model line:", ["None"] + list(plot_df['name'].unique()))
+    highlight_name = st.selectbox("🎯 Highlight Model:", ["None"] + list(plot_df['name'].unique()))
     
-    # 3. Create Custom Graph Object for Highlighting
-    # Define colors: standard lines are semi-transparent purple, highlighted is Neon Gold
-    colors = []
-    line_widths = []
-    for name in plot_df['name']:
-        if name == highlight_name:
-            colors.append("#FFD700") # Gold
-            line_widths.append(6)
-        else:
-            colors.append("rgba(161, 0, 255, 0.3)") # Faded Purple
-            line_widths.append(1)
+    # Fixed Highlighting Logic using a color column
+    plot_df['color_val'] = 0 # Default (Faded Purple)
+    if highlight_name != "None":
+        plot_df.loc[plot_df['name'] == highlight_name, 'color_val'] = 1 # Highlighted (Gold)
 
-    fig = go.Figure(data=go.Parcoords(
-        line = dict(color = range(len(plot_df)), 
-                   colorscale = [[0, 'rgba(161,0,255,0.2)'], [1, 'rgba(161,0,255,0.2)']], # Default
-                   ),
-        dimensions = list([
-            dict(range = [0,1], label = 'Accuracy', values = plot_df['accuracy']),
-            dict(range = [0,120], label = 'Latency (ms)', values = plot_df['latency']),
-            dict(range = [0,15000], label = 'Usage', values = plot_df['usage']),
-            dict(range = [0,0.2], label = 'Drift', values = plot_df['data_drift']),
-            dict(range = [0,100], label = 'CPU %', values = plot_df['cpu_util'])
+    fig_para = go.Figure(data=go.Parcoords(
+        line=dict(
+            color=plot_df['color_val'],
+            colorscale=[[0, 'rgba(161, 0, 255, 0.2)'], [1, 'rgba(255, 215, 0, 1)']], # Purple to Gold
+            showscale=False
+        ),
+        dimensions=list([
+            dict(range=[0, 1], label='Accuracy', values=plot_df['accuracy']),
+            dict(range=[0, 120], label='Latency', values=plot_df['latency']),
+            dict(range=[0, 15000], label='Usage', values=plot_df['usage']),
+            dict(range=[0, 0.2], label='Drift', values=plot_df['data_drift']),
+            dict(range=[0, 100], label='CPU %', values=plot_df['cpu_util'])
         ])
     ))
-    
-    # Overwrite the colors to apply highlighting
-    fig.data[0].line.color = colors
-    fig.data[0].line.width = line_widths
-
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Data Table Drill-down
-    st.subheader("Audit Table")
-    st.dataframe(plot_df[['name', 'domain', 'accuracy', 'latency', 'usage', 'contributor']], use_container_width=True)
+    st.plotly_chart(fig_para, use_container_width=True)
+    st.dataframe(plot_df[['name', 'domain', 'accuracy', 'usage', 'contributor']], use_container_width=True)
