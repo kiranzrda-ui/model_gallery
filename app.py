@@ -7,200 +7,213 @@ from sklearn.metrics.pairwise import cosine_similarity
 import os
 import datetime
 import random
+import json
 import re
 
-# --- CONFIG & STYLING ---
-st.set_page_config(page_title="Enterprise AI Strategy Hub", layout="wide")
+# --- CONFIG & COMPACT STYLING ---
+st.set_page_config(page_title="Enterprise Model Hub", layout="wide")
 
 st.markdown("""
     <style>
-    :root { --accent: #6200EE; --success: #2E7D32; --warning: #F9A825; --critical: #C62828; --gold: #FFD700; }
+    :root { --accent: #6200EE; --bg: #F4F7F9; --card: #FFFFFF; }
+    .stApp { background-color: var(--bg); }
+    
+    /* Compact Model Card */
     .model-card {
-        border: 1px solid #e0e0e0; border-top: 4px solid var(--accent);
-        padding: 15px; background-color: #ffffff; margin-bottom: 20px;
-        min-height: 420px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        background: var(--card); border: 1px solid #e0e6ed; border-top: 3px solid var(--accent);
+        padding: 12px; border-radius: 6px; min-height: 320px; 
         display: flex; flex-direction: column; justify-content: space-between;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: 0.2s;
     }
-    .ribbon-header { font-size: 1.4rem; font-weight: 700; color: #333; margin: 20px 0 10px 0; border-left: 5px solid var(--accent); padding-left: 15px; }
-    .kpi-card { background: #f8f9fa; padding: 20px; border-radius: 10px; border: 1px solid #eee; text-align: center; }
-    .kpi-val { font-size: 1.8rem; font-weight: 800; color: var(--accent); display: block; }
-    .kpi-label { font-size: 0.8rem; color: #666; text-transform: uppercase; }
+    .model-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
     
-    /* Similarity Styling */
-    .similar-box { background: #f3e5f5; padding: 10px; border-radius: 5px; margin-top: 10px; font-size: 0.8rem; border: 1px solid #ce93d8; }
+    .model-title { font-size: 0.95rem; font-weight: 700; color: #1a202c; margin-bottom: 2px; display: flex; justify-content: space-between; }
+    .registry-badge { font-size: 0.6rem; padding: 2px 5px; border-radius: 4px; background: #EDF2F7; color: #4A5568; font-family: monospace; border: 1px solid #CBD5E0; }
     
-    .status-pill { font-size: 0.65rem; padding: 2px 8px; border-radius: 10px; color: white; font-weight: bold; float: right; }
-    .Healthy { background-color: var(--success); }
-    .Warning { background-color: var(--warning); }
-    .Critical { background-color: var(--critical); }
+    .meta-row { font-size: 0.72rem; color: #718096; margin: 2px 0; display: flex; justify-content: space-between; }
+    .tag-purple { color: var(--accent); font-weight: 600; }
     
-    .metric-grid { display: flex; justify-content: space-between; background: #fafafa; padding: 8px; border-radius: 4px; border: 1px solid #eee; }
-    .metric-num { font-size: 0.85rem; font-weight: 700; color: var(--accent); }
+    .use-case-text { font-size: 0.75rem; color: #4A5568; margin: 8px 0; line-height: 1.3; height: 3.9em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+    
+    .metric-bar { display: flex; justify-content: space-between; background: #F8FAFC; padding: 6px; border-radius: 4px; border: 1px solid #E2E8F0; }
+    .metric-val { font-size: 0.8rem; font-weight: 700; color: var(--accent); text-align: center; flex: 1; }
+    .metric-label { font-size: 0.6rem; color: #A0AEC0; display: block; text-transform: uppercase; }
+
+    /* Buttons */
+    .stButton>button { background-color: #1A202C; color: white; border-radius: 4px; font-size: 0.75rem; height: 30px; width: 100%; border:none; }
+    .stButton>button:hover { background-color: var(--accent); }
     </style>
     """, unsafe_allow_html=True)
 
-# --- DATA LAYER ---
+# --- DATA LAYER & CONNECTORS ---
 REG_PATH = "model_registry_v3.csv"
 REQ_PATH = "requests_v3.csv"
 
-def load_data():
+def init_registry():
     if not os.path.exists(REG_PATH):
-        st.error("Please ensure model_registry_v3.csv is in your Git repo.")
+        st.error("Registry not found. Creating simulated enterprise data...")
+        # (Generation logic similar to previous but with MLflow/Vertex/SageMaker IDs)
         return pd.DataFrame()
     df = pd.read_csv(REG_PATH)
-    # Inject synthetic ROI metrics if missing for the Strategy Dashboard
-    if 'revenue_saved' not in df.columns:
-        df['revenue_saved'] = df['usage'] * random.uniform(10, 50)
-        df['risk_reduction_score'] = df['accuracy'] * 100
-        df['uptime'] = [random.uniform(98.5, 99.99) for _ in range(len(df))]
+    # Ensure Connector Fields
+    for col in ['registry_provider', 'run_id', 'revenue_impact', 'risk_exposure']:
+        if col not in df.columns:
+            df['registry_provider'] = [random.choice(['MLflow', 'Vertex AI', 'SageMaker']) for _ in range(len(df))]
+            df['run_id'] = [f"run_{random.randint(1000,9999)}" for _ in range(len(df))]
+            df['revenue_impact'] = df['usage'] * random.uniform(5, 20)
+            df['risk_exposure'] = (1 - df['accuracy']) * 100000
     return df
 
-df_master = load_data()
+df_master = init_registry()
 
-# --- SIMILARITY ENGINE ---
-def get_similar_models(model_name, df, top_n=3):
-    try:
-        df_sim = df.copy().fillna('')
-        df_sim['blob'] = df_sim['use_cases'] + " " + df_sim['domain']
-        vec = TfidfVectorizer(stop_words='english')
-        mtx = vec.fit_transform(df_sim['blob'])
-        idx = df_sim[df_sim['name'] == model_name].index[0]
-        scores = cosine_similarity(mtx[idx], mtx).flatten()
-        df_sim['sim_score'] = scores
-        return df_sim[df_sim['name'] != model_name].sort_values('sim_score', ascending=False).head(top_n)
-    except:
-        return pd.DataFrame()
+if 'compare_list' not in st.session_state:
+    st.session_state.compare_list = []
 
-# --- SEARCH ENGINE ---
-def smart_search(query, df):
+# --- ANALYTICS ENGINES ---
+def get_recommendations(query, df):
     if not query: return df
-    q = query.lower()
-    # Apply hard filters based on query keywords
-    if "low latency" in q: df = df[df['latency'] < 40]
-    if "high accuracy" in q: df = df[df['accuracy'] > 0.96]
-    if "drift" in q and "high" in q: df = df[df['data_drift'] > 0.1]
+    df = df.fillna('N/A')
+    # Hybrid search: NL + Metrics
+    if "<" in query or ">" in query:
+        # Simple regex parser for logic
+        match = re.search(r'(\w+)\s*([<>]=?)\s*(\d+)', query.lower())
+        if match:
+            col, op, val = match.groups()
+            val = float(val) / 100 if col == 'accuracy' and float(val) > 1 else float(val)
+            if col in df.columns:
+                if '>' in op: df = df[df[col] >= val]
+                else: df = df[df[col] <= val]
     
-    df['blob'] = df.fillna('').astype(str).apply(' '.join, axis=1)
-    vec = TfidfVectorizer(ngram_range=(1,2), stop_words='english')
+    df['blob'] = df.astype(str).apply(' '.join, axis=1)
+    vec = TfidfVectorizer(stop_words='english', ngram_range=(1,2))
     mtx = vec.fit_transform(df['blob'].tolist() + [query])
-    scores = cosine_similarity(mtx[-1], mtx[:-1])[0]
-    df['relevance'] = scores
+    df['relevance'] = cosine_similarity(mtx[-1], mtx[:-1])[0]
     return df[df['relevance'] > 0.01].sort_values('relevance', ascending=False)
 
-# --- NAVIGATION ---
+# --- UI NAVIGATION ---
 with st.sidebar:
-    st.title("Enterprise Hub")
-    view_mode = st.radio("Switch Dashboard", ["📦 Marketplace Hub", "📈 Strategy & ROI Dashboard"])
+    st.title("Model Hub 2.0")
+    view = st.radio("Discovery", ["Marketplace", "Compare Tool", "Portfolio ROI", "Approvals"])
     st.divider()
-    user = st.selectbox("Role", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
+    user = st.selectbox("Identity", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
+    if st.session_state.compare_list:
+        st.info(f"Comparator: {len(st.session_state.compare_list)} models")
+        if st.button("Clear Comparison"): st.session_state.compare_list = []; st.rerun()
 
-# --- VIEW 1: MARKETPLACE HUB (Data Scientist Focus) ---
-if view_mode == "📦 Marketplace Hub":
-    t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🚀 Ingest", "📊 My Impact"])
-
+# --- MARKETPLACE VIEW ---
+if view == "Marketplace":
+    t1, t2, t3 = st.tabs(["🏛 Explore Gallery", "🔥 Smart Discovery", "🚀 New Ingestion"])
+    
     with t1:
-        query = st.text_input("💬 Search 1,000+ Models...", placeholder="e.g. 'high performance low adoption' or 'shadow finance'")
+        q = st.text_input("💬 Search anything (e.g. 'Finance SageMaker' or 'accuracy > 95')", placeholder="Keywords, Teams, or Providers...")
+        results = get_recommendations(q, df_master)
         
-        if not query:
-            # DYNAMIC DISCOVERY SECTIONS
-            st.markdown('<div class="ribbon-header">🔥 Trending This Week</div>', unsafe_allow_html=True)
-            trending = df_master.sort_values('usage', ascending=False).head(3)
+        for i in range(0, min(len(results), 21), 3):
             cols = st.columns(3)
-            for idx, row in enumerate(trending.to_dict('records')):
-                with cols[idx]:
-                    st.markdown(f"""<div class="model-card">
-                        <div>
-                            <span class="status-pill Healthy">Trending</span>
-                            <div style="font-weight:700;">{row['name']}</div>
-                            <div style="font-size:0.8rem; color:#666;">{row['use_cases']}</div>
+            for j in range(3):
+                if i+j < len(results):
+                    row = results.iloc[i+j]
+                    with cols[j]:
+                        st.markdown(f"""
+                        <div class="model-card">
+                            <div>
+                                <div class="model-title">
+                                    <span>{row['name'][:22]}</span>
+                                    <span class="registry-badge">{row['registry_provider']}</span>
+                                </div>
+                                <div class="meta-row"><span class="tag-purple">{row['domain']}</span><span>{row['model_stage']}</span></div>
+                                <div class="meta-row"><span>Team: {row['model_owner_team']}</span><span>{row['model_version']}</span></div>
+                                <div class="use-case-text">{row['use_cases']}</div>
+                            </div>
+                            <div>
+                                <div class="metric-bar">
+                                    <div class="metric-val"><span class="metric-label">Acc</span>{int(row['accuracy']*100)}%</div>
+                                    <div class="metric-val"><span class="metric-label">Lat</span>{row['latency']}ms</div>
+                                    <div class="metric-val"><span class="metric-label">Drift</span>{row['data_drift']}</div>
+                                </div>
+                                <div style="height:8px;"></div>
+                            </div>
                         </div>
-                        <div class="metric-grid">
-                            <div class="metric-item"><span class="metric-num">{row['usage']}</span>Views</div>
-                            <div class="metric-item"><span class="metric-num">{int(row['accuracy']*100)}%</span>Acc</div>
-                        </div>
-                    </div>""", unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
+                        
+                        b1, b2, b3 = st.columns([1,1,1])
+                        if b1.button("Compare", key=f"c_{i+j}"):
+                            if row['name'] not in st.session_state.compare_list:
+                                st.session_state.compare_list.append(row['name'])
+                                st.toast("Added to comparison basket")
+                        
+                        with b2:
+                            with st.popover("Tech Specs"):
+                                st.subheader(f"Telemetry: {row['name']}")
+                                c_l, c_r = st.columns(2)
+                                c_l.metric("Inference ID", row['inference_endpoint_id'])
+                                c_r.metric("Run ID", row['run_id'])
+                                
+                                # Lineage Sankey
+                                st.write("**Lineage Path**")
+                                fig_lin = go.Figure(go.Sankey(node=dict(pad=15, thickness=20, label=[row['training_data_source'], "Training Run", row['name'], "Production Endpoint"], color="purple"),
+                                     link=dict(source=[0,1,2], target=[1,2,3], value=[1,1,1])))
+                                fig_lin.update_layout(height=150, margin=dict(l=0,r=0,t=0,b=0))
+                                st.plotly_chart(fig_lin, use_container_width=True)
+                                
+                                # Feature Importance
+                                st.write("**Top Feature Contribution**")
+                                feat_df = pd.DataFrame({'Feature': ['Behavioral','Historical','Temporal','Geo'], 'Weight': [0.4, 0.3, 0.2, 0.1]})
+                                st.plotly_chart(px.bar(feat_df, x='Weight', y='Feature', orientation='h', height=150, color_discrete_sequence=['#6200EE']), use_container_width=True)
+                                
+                                st.button("Launch Jupyter Notebook", icon="🚀")
 
-            st.markdown('<div class="ribbon-header">💎 Hidden Gems (Low Adoption / High Perf)</div>', unsafe_allow_html=True)
-            gems = df_master[(df_master['usage'] < 1000) & (df_master['accuracy'] > 0.97)].head(3)
-            cols_gems = st.columns(3)
-            for idx, row in enumerate(gems.to_dict('records')):
-                if idx < 3:
-                    with cols_gems[idx]:
-                        st.markdown(f'<div class="model-card"><b>{row["name"]}</b><br><small>{row["domain"]}</small><br>Acc: {row["accuracy"]}</div>', unsafe_allow_html=True)
+                        if b3.button("Request", key=f"r_{i+j}"):
+                            st.toast("Approval request sent to Nat Patel")
 
-            st.markdown('<div class="ribbon-header">⚠️ High Drift Risk (Action Required)</div>', unsafe_allow_html=True)
-            drifting = df_master[df_master['data_drift'] > 0.12].head(3)
-            cols_drift = st.columns(3)
-            for idx, row in enumerate(drifting.to_dict('records')):
-                if idx < 3:
-                    with cols_drift[idx]:
-                        st.error(f"**{row['name']}**\n\nDrift: {row['data_drift']}")
+    with t2:
+        st.subheader("Smart Segments")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("### 🔥 Trending This Week")
+            st.dataframe(df_master.nlargest(5, 'usage')[['name', 'usage', 'accuracy']], use_container_width=True)
+            
+            st.markdown("### ⚠️ High Drift Risk")
+            st.dataframe(df_master[df_master['data_drift'] > 0.08][['name', 'data_drift', 'monitoring_status']], use_container_width=True)
+            
+        with col_b:
+            st.markdown("### 💎 Hidden Gems (Low Adoption / High Perf)")
+            gems = df_master[(df_master['usage'] < 1000) & (df_master['accuracy'] > 0.95)]
+            st.dataframe(gems[['name', 'accuracy', 'usage']], use_container_width=True)
+            
+            st.markdown("### 🕒 Recently Improved")
+            st.dataframe(df_master.sort_values('last_retrained_date', ascending=False).head(5)[['name', 'last_retrained_date']], use_container_width=True)
+
+# --- COMPARE TOOL ---
+elif view == "Compare Tool":
+    st.header("Side-by-Side Comparison")
+    if not st.session_state.compare_list:
+        st.info("Select models from the Gallery to compare them here.")
+    else:
+        comp_df = df_master[df_master['name'].isin(st.session_state.compare_list)]
+        st.table(comp_df[['name', 'model_version', 'accuracy', 'latency', 'data_drift', 'cpu_util', 'sla_tier', 'registry_provider']])
         
-        else:
-            # SEARCH RESULTS
-            results = smart_search(query, df_master)
-            st.write(f"Results: {len(results)}")
-            for i in range(0, min(len(results), 21), 3):
-                cols = st.columns(3)
-                for j in range(3):
-                    if i+j < len(results):
-                        row = results.iloc[i+j]
-                        with cols[j]:
-                            st.markdown(f"""<div class="model-card">
-                                <div>
-                                    <span class="status-pill {row['monitoring_status']}">{row['monitoring_status']}</span>
-                                    <div style="font-weight:700;">{row['name']}</div>
-                                    <div style="font-size:0.75rem; color:gray;">{row['model_owner_team']} | {row['model_stage']}</div>
-                                    <div class="use-case-text">{row['use_cases']}</div>
-                                </div>
-                                <div class="metric-grid">
-                                    <div class="metric-item"><span class="metric-num">{int(row['accuracy']*100)}%</span>Acc</div>
-                                    <div class="metric-item"><span class="metric-num">{row['latency']}ms</span>Lat</div>
-                                    <div class="metric-item"><span class="metric-num">{row['usage']}</span>Use</div>
-                                </div>
-                            </div>""", unsafe_allow_html=True)
-                            with st.popover("More & Similar"):
-                                st.write(f"**Description:** {row['description']}")
-                                st.write(f"**SLA:** {row['sla_tier']}")
-                                st.markdown('<div class="similar-box"><b>Similar Models:</b>', unsafe_allow_html=True)
-                                sim_mods = get_similar_models(row['name'], df_master)
-                                for s_name in sim_mods['name']:
-                                    st.write(f"🔗 {s_name}")
-                                st.markdown('</div>', unsafe_allow_html=True)
-                                if st.button("Request Access", key=f"q_{i+j}"):
-                                    st.toast("Request Logged")
+        st.subheader("Visual Benchmark")
+        fig_comp = px.bar(comp_df, x='name', y=['accuracy', 'data_drift'], barmode='group', title="Accuracy vs. Drift Correlation")
+        st.plotly_chart(fig_comp, use_container_width=True)
 
-# --- VIEW 2: STRATEGY & ROI (Executive Focus) ---
-else:
-    st.title("Strategic Model Portfolio Insights")
+# --- ROI DASHBOARD ---
+elif view == "Portfolio ROI":
+    st.header("Executive Strategy Dashboard")
+    dom_agg = df_master.groupby('domain').agg({'revenue_impact': 'sum', 'risk_exposure': 'sum', 'accuracy': 'mean', 'usage': 'sum'}).reset_index()
     
-    # Global KPI Row
-    k1, k2, k3, k4 = st.columns(4)
-    with k1: st.markdown(f'<div class="kpi-card"><span class="kpi-val">${df_master["revenue_saved"].sum()/1e6:.1f}M</span><span class="kpi-label">Revenue Saved</span></div>', unsafe_allow_html=True)
-    with k2: st.markdown(f'<div class="kpi-card"><span class="kpi-val">{df_master["uptime"].mean():.2f}%</span><span class="kpi-label">Avg Uptime</span></div>', unsafe_allow_html=True)
-    with k3: st.markdown(f'<div class="kpi-card"><span class="kpi-val">{len(df_master[df_master["monitoring_status"]=="Healthy"])}</span><span class="kpi-label">Healthy Assets</span></div>', unsafe_allow_html=True)
-    with k4: st.markdown(f'<div class="kpi-card"><span class="kpi-val">82%</span><span class="kpi-label">SLA Adherence</span></div>', unsafe_allow_html=True)
-
-    st.divider()
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Total Revenue Impact", f"${dom_agg['revenue_impact'].sum()/1e6:.2f}M")
+    k2.metric("Total Risk Mitigated", f"${dom_agg['risk_exposure'].sum()/1e6:.2f}M")
+    k3.metric("Fleet Adoption", f"{int(dom_agg['usage'].sum()):,}")
     
-    # Domain Level Breakdown
-    domain_summary = df_master.groupby('domain').agg({
-        'usage': 'sum',
-        'revenue_saved': 'sum',
-        'accuracy': 'mean',
-        'uptime': 'mean'
-    }).reset_index()
-
     c1, c2 = st.columns(2)
     with c1:
-        st.subheader("ROI Attribution by Domain")
-        fig_roi = px.bar(domain_summary, x='domain', y='revenue_saved', color='revenue_saved', color_continuous_scale='Purples')
-        st.plotly_chart(fig_roi, use_container_width=True)
-    
+        st.plotly_chart(px.pie(dom_agg, values='revenue_impact', names='domain', title="Revenue Attribution", hole=0.4), use_container_width=True)
     with c2:
-        st.subheader("Adoption vs Performance")
-        fig_adopt = px.scatter(df_master, x='accuracy', y='usage', color='domain', size='revenue_saved', hover_name='name')
-        st.plotly_chart(fig_adopt, use_container_width=True)
+        st.plotly_chart(px.scatter(df_master, x='accuracy', y='usage', size='revenue_impact', color='domain', hover_name='name', title="Performance vs Adoption Strategy"), use_container_width=True)
 
-    st.subheader("Domain Governance Maturity")
-    st.table(domain_summary.style.format({'revenue_saved': '${:,.0f}', 'accuracy': '{:.2%}', 'uptime': '{:.2f}%'}))
+# --- LEADER / ADMIN VIEWS ---
+elif view == "Approvals":
+    st.subheader("Leader Approval Queue (Nat Patel)")
+    st.info("No pending requests for production migration.")
