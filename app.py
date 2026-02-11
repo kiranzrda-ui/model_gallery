@@ -7,178 +7,148 @@ import datetime
 import random
 
 # --- ACCENTURE-INSPIRED STYLING ---
-st.set_page_config(page_title="Enterprise AI Model Marketplace", layout="wide")
+st.set_page_config(page_title="AI Model Marketplace", layout="wide")
 
 st.markdown("""
     <style>
     :root { --accent-color: #A100FF; }
     .stApp { background-color: #ffffff; }
-    h1, h2, h3 { font-family: 'Graphik', 'Arial'; color: #000000; }
-    .stButton>button { background-color: #A100FF; color: white; border-radius: 0px; border: none; width: 100%; }
-    .stButton>button:hover { background-color: #000000; color: white; }
+    
     .model-card {
         border: 1px solid #e0e0e0;
-        border-left: 5px solid #A100FF;
-        padding: 20px;
+        border-top: 4px solid #A100FF;
+        padding: 15px;
         background-color: #ffffff;
-        margin-bottom: 15px;
+        margin-bottom: 20px;
+        height: 420px; 
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
         transition: 0.3s;
     }
-    .model-card:hover { box-shadow: 5px 5px 15px rgba(0,0,0,0.1); }
-    .status-tag { font-size: 0.7rem; padding: 3px 10px; background: #000; color: #fff; border-radius: 0px; text-transform: uppercase; }
-    .metric-text { font-size: 0.85rem; color: #666; }
+    .model-card:hover { 
+        box-shadow: 0px 4px 15px rgba(161, 0, 255, 0.2); 
+        transform: translateY(-5px);
+    }
+    
+    .domain-tag { font-size: 0.7rem; font-weight: bold; color: #A100FF; text-transform: uppercase; margin-bottom: 5px; }
+    .type-badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; float: right; }
+    .badge-official { background-color: #e8dbff; color: #A100FF; }
+    .badge-community { background-color: #f0f0f0; color: #666; }
+    
+    .model-title { font-size: 1.1rem; font-weight: 700; color: #000; margin: 5px 0; min-height: 50px; }
+    .model-desc { font-size: 0.85rem; color: #444; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+    .client-text { font-size: 0.8rem; color: #888; font-style: italic; margin-top: 10px; }
+    .metric-row { display: flex; justify-content: space-between; font-size: 0.75rem; color: #000; border-top: 1px solid #eee; padding-top: 10px; }
+    
+    .stButton>button { background-color: #000; color: white; border-radius: 0px; border: none; width: 100%; font-size: 0.8rem; }
+    .stButton>button:hover { background-color: #A100FF; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- DATA GENERATOR (50+ MODELS) ---
+# --- DATA INITIALIZATION ---
 if 'registry' not in st.session_state:
-    raw_data = [
-        # FINANCE
-        ["Fin-Audit-GPT", "Finance", "Official", 0.98, "200ms", "JP Morgan, HSBC", "Internal Audit Automation", "LLM for detecting non-compliant transactions in ledgers."],
-        ["Tax-Genie-V2", "Finance", "Official", 0.94, "45ms", "Accenture", "VAT Compliance", "Automates tax categorization for cross-border trade."],
-        ["Risk-Pulse-Forex", "Finance", "Official", 0.88, "10ms", "Barclays", "Currency Risk", "Real-time hedging recommendations for FX volatility."],
-        ["Debt-Collector-Optimizer", "Finance", "Community", 0.82, "100ms", "Internal Tech", "Accounts Receivable", "Predicts best time to contact debtors for recovery."],
-        ["Equity-Analyst-Pro", "Finance", "Official", 0.91, "1.2s", "BlackRock", "Portfolio Sentiment", "Scans news and earnings calls for buy/sell signals."],
-        
-        # HR
-        ["Talent-Match-AI", "HR", "Official", 0.95, "30ms", "Google, Accenture", "Hiring Bias Removal", "Matches resumes to JDs while masking gender/ethnic data."],
-        ["Culture-Pulse", "HR", "Official", 0.85, "15ms", "Salesforce", "Retention Analysis", "Sentiment analysis on internal Slack/Email to predict attrition."],
-        ["Pay-Equity-Scanner", "HR", "Official", 0.99, "5ms", "Microsoft", "Salary Governance", "Identifies pay gaps across demographics automatically."],
-        ["Workforce-Planner-2025", "HR", "Community", 0.78, "2s", "Internal Tech", "Capacity Planning", "Simulates hiring needs based on sales pipeline growth."],
-        ["Skill-Graph-Builder", "HR", "Official", 0.92, "400ms", "LinkedIn", "L&D Pathing", "Maps current employee skills to future required roles."],
-
-        # PROCUREMENT & SUPPLY CHAIN
-        ["Eco-Vendor-Scorer", "Procurement", "Official", 0.87, "50ms", "Unilever", "ESG Scoring", "Evaluates supplier sustainability using satellite and news data."],
-        ["Logi-Route-Optimizer", "Supply Chain", "Official", 0.96, "300ms", "FedEx, DHL", "Last-Mile Delivery", "Reduces fuel consumption by optimizing multi-stop routes."],
-        ["Inventory-Ghost-Detector", "Supply Chain", "Official", 0.93, "20ms", "Walmart", "Stock Accuracy", "Predicts phantom inventory where system says 'in stock' but shelf is empty."],
-        ["Contract-Review-Bot", "Procurement", "Official", 0.91, "800ms", "BMW", "Legal Compliance", "Extracts termination clauses and liability from PDF contracts."],
-        ["Price-Negotiator-Agent", "Procurement", "Community", 0.76, "1.5s", "Internal Tech", "Auto-Bidding", "Suggests counter-offer prices based on historical raw material costs."],
-
-        # IT & OPERATIONS
-        ["Cloud-Cost-Slasher", "IT", "Official", 0.97, "10ms", "AWS, Netflix", "Cloud FinOps", "Identifies underutilized EC2/S3 instances and auto-scales down."],
-        ["Log-Anomaly-Sentinel", "IT", "Official", 0.99, "2ms", "Cisco", "Cybersecurity", "Zero-day threat detection via server log pattern shifts."],
-        ["Helpdesk-Triage-V4", "IT", "Official", 0.89, "15ms", "ServiceNow", "Auto-Ticketing", "Categorizes and assigns IT support tickets using NLP."],
-        ["SQL-Query-Optimizer", "IT", "Community", 0.84, "500ms", "Internal Tech", "DB Performance", "Suggests missing indexes for slow-running analytical queries."],
-        ["Network-Twin-Sim", "IT", "Official", 0.92, "4s", "Verizon", "Infrastructure", "Digital twin for simulating 5G signal coverage in new cities."]
+    initial_data = [
+        ["Fin-Audit-GPT", "Finance", "Official", 0.98, "200ms", "JP Morgan, Goldman Sachs", "Internal Audit Automation", "High-precision LLM for detecting non-compliant transactions."],
+        ["Tax-Compliance-Pro", "Finance", "Official", 0.94, "45ms", "HSBC, Global Banking Group", "Tax Categorization", "Automates tax code mapping for cross-border trade."],
+        ["Talent-Match-AI", "HR", "Official", 0.95, "30ms", "Google, Microsoft", "Hiring Bias Removal", "Matches resumes while masking demographic data."],
+        ["Eco-Vendor-Scorer", "Procurement", "Official", 0.87, "50ms", "Unilever, Shell", "ESG Scoring", "Evaluates supplier sustainability using news analytics."],
+        ["Logi-Route-Optimizer", "Supply Chain", "Official", 0.96, "300ms", "FedEx, DHL", "Last-Mile Delivery", "Reduces carbon footprint via route optimization."],
+        ["Contract-Review-Bot", "Legal", "Official", 0.91, "800ms", "BMW, Toyota", "Legal Compliance", "Extracts liability clauses from vendor contracts."]
     ]
     
-    # Expand to 50+ models by programmatically generating variations
     domains = ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Marketing", "Legal"]
-    clients_list = ["Accenture", "Apple", "Shell", "Coca-Cola", "Toyota", "NASA", "Goldman Sachs"]
+    clients_list = ["Accenture", "Apple", "Coca-Cola", "NASA", "Amazon", "Samsung", "Meta"]
     
-    for i in range(len(raw_data), 55):
-        domain = random.choice(domains)
-        model_name = f"{domain}-Analyzer-{i}"
-        raw_data.append([
-            model_name, domain, "Official" if i % 2 == 0 else "Community",
-            round(random.uniform(0.75, 0.99), 2), 
-            f"{random.randint(5, 500)}ms",
-            f"{random.choice(clients_list)}, {random.choice(clients_list)}",
-            f"Automated {domain} Support",
-            f"This is a high-performance {domain} model designed for enterprise scalability and {random.choice(['risk reduction', 'cost savings', 'efficiency', 'innovation'])}."
+    # Generate 50 models
+    for i in range(len(initial_data), 50):
+        dom = random.choice(domains)
+        initial_data.append([
+            f"{dom}-Intelligence-{i+100}", dom, "Official",
+            round(random.uniform(0.80, 0.98), 2), f"{random.randint(10, 500)}ms",
+            f"{random.choice(clients_list)}", f"Standard {dom} Analysis",
+            f"An enterprise {dom} model designed for high-throughput processing and predictive accuracy."
         ])
 
-    st.session_state.registry = pd.DataFrame(raw_data, columns=["name", "domain", "type", "accuracy", "latency", "clients", "use_cases", "description"])
-    st.session_state.registry['usage'] = [random.randint(100, 10000) for _ in range(len(st.session_state.registry))]
+    st.session_state.registry = pd.DataFrame(initial_data, columns=["name", "domain", "type", "accuracy", "latency", "clients", "use_cases", "description"])
+    st.session_state.registry['usage'] = [random.randint(100, 5000) for _ in range(len(st.session_state.registry))]
 
-# --- SEARCH LOGIC ---
+# --- SEARCH ENGINE (Updated to handle empty strings/nulls) ---
 def get_recommendations(query, df):
-    # Combine all text fields for "Rich Search"
+    if not query: return df
     df = df.copy()
-    df['combined_text'] = df['name'] + " " + df['domain'] + " " + df['use_cases'] + " " + df['description'] + " " + df['clients']
-    
+    df['search_blob'] = (df['name'] + " " + df['domain'] + " " + df['use_cases'] + " " + df['description'] + " " + df['clients']).fillna('')
     vectorizer = TfidfVectorizer(stop_words='english')
-    tfidf_matrix = vectorizer.fit_transform(df['combined_text'].tolist() + [query])
-    
-    cosine_sim = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1])[0]
-    df['search_score'] = cosine_sim
-    return df[df['search_score'] > 0.05].sort_values(by='search_score', ascending=False)
+    matrix = vectorizer.fit_transform(df['search_blob'].tolist() + [query])
+    scores = cosine_similarity(matrix[-1], matrix[:-1])[0]
+    df['score'] = scores
+    return df[df['score'] > 0.01].sort_values(by='score', ascending=False)
 
-# --- UI LAYOUT ---
+# --- HEADER ---
 st.title("A. Model Marketplace")
+st.caption("Centralized Repository for Enterprise AI & Community Contributions")
 st.markdown("---")
 
-sidebar = st.sidebar
-sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accenture.svg/2560px-Accenture.svg.png", width=150)
-role = sidebar.selectbox("User Role", ["Data Scientist", "Administrator"])
+# --- SIDEBAR ---
+with st.sidebar:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accenture.svg/2560px-Accenture.svg.png", width=120)
+    role = st.radio("Switch Dashboard", ["Marketplace (Consumer)", "Governance (Admin)"])
+    st.divider()
+    st.write(f"**Total Assets:** {len(st.session_state.registry)}")
 
-# --- DATA SCIENTIST VIEW ---
-if role == "Data Scientist":
-    tab1, tab2, tab3 = st.tabs(["🔍 Browse Gallery", "🤝 Community Contributions", "🚀 Contribute Model"])
+# --- MARKETPLACE VIEW ---
+if role == "Marketplace (Consumer)":
+    tab_gallery, tab_contribute = st.tabs(["🏛 Unified Gallery", "🚀 Contribute New Model"])
     
-    with tab1:
-        col_s1, col_s2 = st.columns([3, 1])
-        with col_s1:
-            q = st.text_input("💬 Search by task, client, or domain (e.g., 'Walmart' or 'Fraud detection')", placeholder="Try 'Accenture' or 'NLP'...")
-        with col_s2:
-            d_filter = st.selectbox("Industry Domain", ["All"] + list(st.session_state.registry['domain'].unique()))
+    with tab_gallery:
+        c_search, c_filter = st.columns([3, 1])
+        with c_search:
+            query = st.text_input("🔍 Search everything (Tasks, Clients, Names...)", placeholder="e.g. 'Sustainability' or 'JP Morgan'")
+        with c_filter:
+            type_filter = st.multiselect("Source", ["Official", "Community"], default=["Official", "Community"])
 
         # Filter and Search
-        display_df = st.session_state.registry[st.session_state.registry['type'] == 'Official']
-        if d_filter != "All":
-            display_df = display_df[display_df['domain'] == d_filter]
+        filtered_df = st.session_state.registry[st.session_state.registry['type'].isin(type_filter)]
+        results = get_recommendations(query, filtered_df)
+
+        st.write(f"Results: {len(results)} Models")
         
-        if q:
-            results = get_recommendations(q, display_df)
-        else:
-            results = display_df
+        # Grid Display (3 tiles per row)
+        for i in range(0, len(results), 3):
+            cols = st.columns(3)
+            for j in range(3):
+                if i + j < len(results):
+                    row = results.iloc[i + j]
+                    badge_class = "badge-official" if row['type'] == "Official" else "badge-community"
+                    with cols[j]:
+                        st.markdown(f"""
+                        <div class="model-card">
+                            <div>
+                                <span class="type-badge {badge_class}">{row['type']}</span>
+                                <div class="domain-tag">{row['domain']}</div>
+                                <div class="model-title">{row['name']}</div>
+                                <div class="model-desc">{row['description']}</div>
+                                <div class="client-text">Use Case: {row['use_cases']}</div>
+                                <div class="client-text" style="color:#A100FF;">Clients: {row['clients']}</div>
+                            </div>
+                            <div>
+                                <div class="metric-row">
+                                    <span><b>ACCURACY:</b> {int(row['accuracy']*100)}%</span>
+                                    <span><b>LATENCY:</b> {row['latency']}</span>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        if st.button("Access Model", key=f"btn_{row['name']}_{i+j}"):
+                            st.toast(f"Generating API keys for {row['name']}...")
 
-        st.subheader(f"Available Models ({len(results)})")
-        for _, row in results.iterrows():
-            with st.container():
-                st.markdown(f"""
-                <div class="model-card">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span class="status-tag">{row['domain']}</span>
-                        <span style="color: #A100FF; font-weight: bold;">{int(row.get('search_score', 0)*100) if q else ""}</span>
-                    </div>
-                    <h3>{row['name']}</h3>
-                    <p>{row['description']}</p>
-                    <div class="metric-text">
-                        <b>Use Case:</b> {row['use_cases']} <br>
-                        <b>Clients:</b> {row['clients']} <br>
-                        <b>Accuracy:</b> {row['accuracy']*100}% | <b>Latency:</b> {row['latency']}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button(f"Deploy {row['name']}", key=f"btn_{row['name']}"):
-                    st.success(f"Integration endpoint for {row['name']} generated!")
-
-    with tab2:
-        st.subheader("Experimental & Community Models")
-        comm_df = st.session_state.registry[st.session_state.registry['type'] == 'Community']
-        st.dataframe(comm_df[['name', 'domain', 'use_cases', 'description']], use_container_width=True)
-
-    with tab3:
-        st.subheader("Submit Your Model")
-        with st.form("contribution_form"):
-            new_name = st.text_input("Model Name")
-            new_domain = st.selectbox("Domain", ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Marketing", "Legal"])
-            new_desc = st.text_area("What does it do? (Be descriptive for search indexing)")
-            new_use = st.text_input("Primary Use Case")
-            submitted = st.form_submit_button("Publish Model")
-            if submitted:
-                new_row = {"name": new_name, "domain": new_domain, "type": "Community", "accuracy": 0.0, "latency": "N/A", "clients": "Internal", "use_cases": new_use, "description": new_desc, "usage": 0}
-                st.session_state.registry = pd.concat([st.session_state.registry, pd.DataFrame([new_row])], ignore_index=True)
-                st.success("Model submitted to Community Hub!")
-
-# --- ADMIN VIEW ---
-else:
-    st.header("Admin Governance Dashboard")
-    
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("Total Models", len(st.session_state.registry))
-    col_m2.metric("Official Asset Value", "$4.2M")
-    col_m3.metric("Avg Search Success", "92%")
-    col_m4.metric("Community Assets", len(st.session_state.registry[st.session_state.registry['type']=='Community']))
-
-    c1, c2 = st.columns(2)
-    with c1:
-        fig1 = px.bar(st.session_state.registry, x='domain', y='usage', color='domain', title="Consumption by Business Unit", color_discrete_sequence=px.colors.sequential.Purples_r)
-        st.plotly_chart(fig1, use_container_width=True)
-    with c2:
-        fig2 = px.box(st.session_state.registry, x='domain', y='accuracy', title="Model Accuracy Distribution", color_discrete_sequence=['#A100FF'])
-        st.plotly_chart(fig2, use_container_width=True)
-
-    st.subheader("Model Inventory Audit Log")
-    st.table(st.session_state.registry[['name', 'domain', 'type', 'usage']].sort_values(by='usage', ascending=False).head(10))
+    with tab_contribute:
+        st.subheader("Contribute to the Enterprise Intelligence")
+        st.write("Newly contributed models appear instantly in the Unified Gallery for search and discovery.")
+        
+        with st.form("contribution_form", clear_on_submit=True):
+            col_a, col_b = st.columns(2)
+            with col_a:
+                c_name = st.text_input("Model Name (e.g. Supply-Chain-Optim-V1)")
+                c_domain = st.selectbox("Business Domain", domains)
+            with col_b:
