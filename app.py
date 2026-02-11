@@ -6,6 +6,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 import datetime
 import random
 
+# --- CONSTANTS (Defined at top to prevent NameErrors) ---
+DOMAIN_LIST = ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Marketing", "Legal"]
+CLIENTS_POOL = ["Accenture", "Apple", "Coca-Cola", "NASA", "Amazon", "Samsung", "Meta", "JP Morgan", "Barclays"]
+
 # --- ACCENTURE-INSPIRED STYLING ---
 st.set_page_config(page_title="AI Model Marketplace", layout="wide")
 
@@ -41,11 +45,11 @@ st.markdown("""
     .client-text { font-size: 0.8rem; color: #888; font-style: italic; margin-top: 10px; }
     .metric-row { display: flex; justify-content: space-between; font-size: 0.75rem; color: #000; border-top: 1px solid #eee; padding-top: 10px; }
     
-    /* Button inside tile */
+    /* Global Button Styling */
     .stButton>button { background-color: #000; color: white; border-radius: 0px; border: none; width: 100%; font-size: 0.8rem; }
     .stButton>button:hover { background-color: #A100FF; color: white; }
     
-    /* Submit button for form */
+    /* Form Submit Button Styling */
     div[data-testid="stForm"] button {
         background-color: #A100FF !important;
         color: white !important;
@@ -65,15 +69,13 @@ if 'registry' not in st.session_state:
         ["Contract-Review-Bot", "Legal", "Official", 0.91, "800ms", "BMW, Toyota", "Legal Compliance", "Extracts liability clauses from vendor contracts."]
     ]
     
-    domains = ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Marketing", "Legal"]
-    clients_list = ["Accenture", "Apple", "Coca-Cola", "NASA", "Amazon", "Samsung", "Meta"]
-    
+    # Generate 50 models
     for i in range(len(initial_data), 50):
-        dom = random.choice(domains)
+        dom = random.choice(DOMAIN_LIST)
         initial_data.append([
             f"{dom}-Intelligence-{i+100}", dom, "Official",
             round(random.uniform(0.80, 0.98), 2), f"{random.randint(10, 500)}ms",
-            f"{random.choice(clients_list)}", f"Standard {dom} Analysis",
+            f"{random.choice(CLIENTS_POOL)}", f"Standard {dom} Analysis",
             f"An enterprise {dom} model designed for high-throughput processing and predictive accuracy."
         ])
 
@@ -84,17 +86,19 @@ if 'registry' not in st.session_state:
 def get_recommendations(query, df):
     if not query or query.strip() == "": return df
     df = df.copy()
-    # Ensure no empty values in search blob
-    df['search_blob'] = (df['name'].fillna('') + " " + 
-                         df['domain'].fillna('') + " " + 
-                         df['use_cases'].fillna('') + " " + 
-                         df['description'].fillna('') + " " + 
-                         df['clients'].fillna(''))
+    # Combine fields into a searchable string, handling potential empty values
+    df['search_blob'] = (df['name'].astype(str) + " " + 
+                         df['domain'].astype(str) + " " + 
+                         df['use_cases'].astype(str) + " " + 
+                         df['description'].astype(str) + " " + 
+                         df['clients'].astype(str)).fillna('')
     
     vectorizer = TfidfVectorizer(stop_words='english')
-    # Fit on all existing models + the user query
-    matrix = vectorizer.fit_transform(df['search_blob'].tolist() + [query])
-    # Compare the last item (query) with all previous items
+    # Fit on the list of models plus the user query
+    corpus = df['search_blob'].tolist() + [query]
+    matrix = vectorizer.fit_transform(corpus)
+    
+    # Cosine similarity between query (last row) and all models
     scores = cosine_similarity(matrix[-1], matrix[:-1])[0]
     df['score'] = scores
     return df[df['score'] > 0.01].sort_values(by='score', ascending=False)
@@ -109,7 +113,7 @@ with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accenture.svg/2560px-Accenture.svg.png", width=120)
     role = st.radio("Switch Dashboard", ["Marketplace (Consumer)", "Governance (Admin)"])
     st.divider()
-    st.write(f"**Live Model Count:** {len(st.session_state.registry)}")
+    st.write(f"**Total Assets:** {len(st.session_state.registry)}")
 
 # --- MARKETPLACE VIEW ---
 if role == "Marketplace (Consumer)":
@@ -118,11 +122,11 @@ if role == "Marketplace (Consumer)":
     with tab_gallery:
         c_search, c_filter = st.columns([3, 1])
         with c_search:
-            query = st.text_input("🔍 Search everything...", placeholder="Try 'Supply Chain' or 'Fraud'...")
+            query = st.text_input("🔍 AI Search: Describe a task, client, or domain...", placeholder="Try 'Supply Chain' or 'JP Morgan'")
         with c_filter:
-            type_filter = st.multiselect("Source", ["Official", "Community"], default=["Official", "Community"])
+            type_filter = st.multiselect("Asset Type", ["Official", "Community"], default=["Official", "Community"])
 
-        # Combine Search and Filter
+        # Logic: Filter types first, then apply search
         df_to_show = st.session_state.registry[st.session_state.registry['type'].isin(type_filter)]
         results = get_recommendations(query, df_to_show)
 
@@ -143,7 +147,7 @@ if role == "Marketplace (Consumer)":
                                 <div class="domain-tag">{row['domain']}</div>
                                 <div class="model-title">{row['name']}</div>
                                 <div class="model-desc">{row['description']}</div>
-                                <div class="client-text"><b>Use Case:</b> {row['use_cases']}</div>
+                                <div class="client-text"><b>Case:</b> {row['use_cases']}</div>
                                 <div class="client-text" style="color:#A100FF;"><b>Clients:</b> {row['clients']}</div>
                             </div>
                             <div>
@@ -155,61 +159,68 @@ if role == "Marketplace (Consumer)":
                         </div>
                         """, unsafe_allow_html=True)
                         if st.button("Request Access", key=f"btn_{row['name']}_{i+j}"):
-                            st.toast(f"Generating access token for {row['name']}...")
+                            st.toast(f"Access request for {row['name']} sent to administrator.")
 
     with tab_contribute:
         st.subheader("Register a New Community Asset")
+        st.write("Models submitted here are instantly indexed and made searchable for the entire organization.")
         
-        # FIXED FORM BLOCK
-        with st.form(key="contribute_form", clear_on_submit=True):
-            col_1, col_2 = st.columns(2)
-            with col_1:
-                name_in = st.text_input("Model Name", placeholder="e.g. Demand-Forecaster-V1")
-                domain_in = st.selectbox("Business Domain", domains)
-            with col_2:
-                client_in = st.text_input("Clients Used In", placeholder="e.g. Internal Project, Client-X")
-                case_in = st.text_input("Primary Use Case", placeholder="e.g. Inventory Reduction")
+        with st.form(key="model_submission_form", clear_on_submit=True):
+            f_col1, f_col2 = st.columns(2)
+            with f_col1:
+                name_in = st.text_input("Model Name*", placeholder="e.g. Invoice-Parser-v2")
+                domain_in = st.selectbox("Business Domain*", DOMAIN_LIST)
+            with f_col2:
+                client_in = st.text_input("Clients Used In", placeholder="e.g. Internal R&D, Tech-Project")
+                case_in = st.text_input("Primary Use Case", placeholder="e.g. Cost reduction")
             
-            desc_in = st.text_area("Detailed Description (Keywords help search)")
+            desc_in = st.text_area("Detailed Description* (Include keywords for search optimization)")
             
-            # This MUST be inside the with st.form() block
-            submit_button = st.form_submit_button(label="Publish to Marketplace")
+            # The submit button
+            submitted = st.form_submit_button("Publish to Marketplace")
 
-            if submit_button:
+            if submitted:
                 if name_in and desc_in:
-                    # Append new model to the central session state registry
-                    new_model = {
+                    # Append new entry to the session state
+                    new_entry = {
                         "name": name_in, 
                         "domain": domain_in, 
                         "type": "Community",
                         "accuracy": 0.0, 
                         "latency": "Pending", 
-                        "clients": client_in,
-                        "use_cases": case_in, 
+                        "clients": client_in if client_in else "N/A",
+                        "use_cases": case_in if case_in else "N/A", 
                         "description": desc_in, 
                         "usage": 0
                     }
-                    st.session_state.registry = pd.concat([st.session_state.registry, pd.DataFrame([new_model])], ignore_index=True)
-                    st.success(f"Success! '{name_in}' is now live and searchable in the Unified Gallery.")
+                    # Update registry
+                    st.session_state.registry = pd.concat([st.session_state.registry, pd.DataFrame([new_entry])], ignore_index=True)
+                    st.success(f"Successfully published '{name_in}'! Switch to the 'Unified Gallery' tab to search for it.")
                 else:
-                    st.error("Model Name and Description are required fields.")
+                    st.error("Name and Description are required.")
 
 # --- ADMIN VIEW ---
 else:
-    st.subheader("Marketplace Efficacy Dashboard")
+    st.subheader("Marketplace Governance & Efficacy")
     
+    # KPI Row
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Search Success Rate", "89%", "+1.2%")
-    k2.metric("New Assets (Monthly)", len(st.session_state.registry), "+5")
-    k3.metric("Avg Ingestion Time", "4.2 days", "-0.5")
-    k4.metric("Community Submissions", len(st.session_state.registry[st.session_state.registry['type']=='Community']))
+    k1.metric("Search Conversion", "91%", "+0.5%")
+    k2.metric("Marketplace Size", len(st.session_state.registry), f"+{len(st.session_state.registry[st.session_state.registry['type']=='Community'])} Community")
+    k3.metric("Avg Ingestion Speed", "3.8 Days")
+    k4.metric("Active Subscriptions", "14.2k")
 
+    # Data Visualization
     c1, c2 = st.columns(2)
     with c1:
-        # Sunburst chart for Domain/Type hierarchy
-        fig = px.sunburst(st.session_state.registry, path=['type', 'domain'], values='usage', color='usage', color_continuous_scale='Purples', title="Asset Popularity by Business Unit")
+        # Sunburst chart
+        fig = px.sunburst(st.session_state.registry, path=['type', 'domain'], values='usage', 
+                          color='usage', color_continuous_scale='Purples', 
+                          title="Marketplace Composition & Asset Popularity")
         st.plotly_chart(fig, use_container_width=True)
     with c2:
-        # Scatter for accuracy vs usage
-        fig2 = px.scatter(st.session_state.registry, x='accuracy', y='usage', size='usage', color='domain', hover_name='name', title="Model Quality vs. Marketplace Demand")
+        # Performance Scatter
+        fig2 = px.scatter(st.session_state.registry, x='accuracy', y='usage', size='usage', 
+                          color='domain', hover_name='name', 
+                          title="Asset Reliability vs. Real-world Consumption")
         st.plotly_chart(fig2, use_container_width=True)
