@@ -64,7 +64,7 @@ df_master = pd.read_csv(REG_PATH)
 search_logs = pd.read_csv(LOG_PATH)
 req_log = pd.read_csv(REQ_PATH)
 
-# --- SIDEBAR & AUTH ---
+# --- AUTH & FILTERS ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accenture.svg/2560px-Accenture.svg.png", width=120)
     user_role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
@@ -91,7 +91,7 @@ if user_role in ["John Doe", "Jane Nu", "Sam King"]:
     t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🚀 Contribute", "📊 My Impact Dashboard"])
     
     with t1:
-        q = st.text_input("💬 Chat Search: Ask by model, client, or performance", placeholder="e.g. 'NASA high accuracy'")
+        q = st.text_input("💬 AI Search (Task, Client, or Logic)", placeholder="e.g. 'NASA high accuracy'")
         display_df = filter_registry(df_master)
         if q:
             display_df['blob'] = display_df.astype(str).apply(' '.join, axis=1)
@@ -121,7 +121,7 @@ if user_role in ["John Doe", "Jane Nu", "Sam King"]:
                             <div class="metric-box">
                                 <span><b>ACC:</b> {int(row['accuracy']*100)}%</span>
                                 <span><b>LAT:</b> {row['latency']}ms</span>
-                                <span><b>DRIFT:</b> {row['data_drift']}</span>
+                                <span><b>USE:</b> {row['usage']}</span>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
@@ -146,24 +146,20 @@ if user_role in ["John Doe", "Jane Nu", "Sam King"]:
     with t3:
         my_m = df_master[df_master['contributor'] == user_role]
         if not my_m.empty:
-            st.subheader("Your Asset Telemetry")
+            st.subheader("Asset Performance Radar")
             sel_m = st.selectbox("Inspect Model", my_m['name'])
             m_dat = my_m[my_m['name'] == sel_m].iloc[0]
             
-            c_radar, c_metrics = st.columns([2, 1])
-            with c_radar:
-                fig_radar = go.Figure(go.Scatterpolar(
-                    r=[m_dat['accuracy']*100, 100-m_dat['data_drift']*100, 100-m_dat['cpu_util'], 100-m_dat['error_rate']*10],
-                    theta=['Accuracy', 'Stability', 'Efficiency', 'Reliability'],
-                    fill='toself', line_color='#A100FF'
-                ))
-                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
-                st.plotly_chart(fig_radar, use_container_width=True)
-            with c_metrics:
-                st.metric("Total Views", m_dat['usage'])
-                st.metric("Throughput", f"{m_dat['throughput']} req/s")
+            # SPIDER CHART
+            fig_radar = go.Figure(go.Scatterpolar(
+                r=[m_dat['accuracy']*100, 100-m_dat['data_drift']*100, 100-m_dat['cpu_util'], 100-m_dat['error_rate']*10],
+                theta=['Accuracy', 'Stability', 'Efficiency', 'Reliability'],
+                fill='toself', line_color='#A100FF'
+            ))
+            fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False, height=400)
+            st.plotly_chart(fig_radar, use_container_width=True)
         else:
-            st.info("No models found in your portfolio.")
+            st.info("No contributions yet.")
 
 # --- LEADER VIEW ---
 elif user_role == "Nat Patel (Leader)":
@@ -171,7 +167,7 @@ elif user_role == "Nat Patel (Leader)":
     pend = req_log[req_log['status'] == "Pending"]
     if not pend.empty:
         for idx, r in pend.iterrows():
-            st.write(f"**{r['requester']}** requested **{r['model_name']}**")
+            st.write(f"**{r['requester']}** wants access to **{r['model_name']}**")
             if st.button("Approve", key=f"ap_{idx}"):
                 req_log.at[idx, 'status'] = "Approved"
                 req_log.to_csv(REQ_PATH, index=False)
@@ -183,7 +179,6 @@ elif user_role == "Nat Patel (Leader)":
 else:
     st.title("Admin Governance Dashboard")
     
-    # KPIs
     k1, k2, k3 = st.columns(3)
     k1.metric("Global Usage", df_master['usage'].sum())
     if len(search_logs) > 0:
@@ -194,8 +189,7 @@ else:
     st.divider()
     st.subheader("Interactive Portfolio Inspector")
     
-    # Selection Logic
-    admin_q = st.text_input("🔍 Search to filter model fleet...", placeholder="e.g. 'NASA'")
+    admin_q = st.text_input("🔍 Filter Model Fleet (Search)", placeholder="e.g. 'NASA'")
     plot_df = df_master.copy()
     if admin_q:
         plot_df['blob'] = plot_df.astype(str).apply(' '.join, axis=1)
@@ -204,38 +198,39 @@ else:
         plot_df['score'] = cosine_similarity(m[-1], m[:-1])[0]
         plot_df = plot_df[plot_df['score'] > 0.05]
     
-    highlight_name = st.selectbox("🎯 Highlight Model (Shows solo line, select 'None' to show all):", ["None"] + list(plot_df['name'].unique()))
+    hl_name = st.selectbox("🎯 Solo Line Inspector (Select Model):", ["None"] + list(plot_df['name'].unique()))
     
-    # Logic: Filter to single line if selection exists
-    final_plot_df = plot_df.copy()
-    if highlight_name != "None":
-        final_plot_df = final_plot_df[final_plot_df['name'] == highlight_name]
-        line_settings = dict(color="#FFD700", width=6) # Solo Gold Line
+    # DATA & COLOR LOGIC TO PREVENT CRASH
+    # Use a numeric list for line colors. 
+    # If a model is selected, other lines are invisible.
+    color_vals = []
+    if hl_name == "None":
+        color_vals = plot_df['accuracy'].tolist()
+        c_scale = [[0, 'rgba(161, 0, 255, 0.2)'], [1, 'rgba(161, 0, 255, 0.8)']]
     else:
-        line_settings = dict(
-            color=final_plot_df['accuracy'],
-            colorscale=[[0, 'rgba(161, 0, 255, 0.2)'], [1, 'rgba(161, 0, 255, 0.8)']],
-            showscale=False
-        )
+        # 1 for selected model, 0 for others
+        color_vals = [1 if name == hl_name else 0 for name in plot_df['name']]
+        # colorscale: 0 is transparent, 1 is Gold
+        c_scale = [[0, 'rgba(0,0,0,0)'], [1, 'rgba(255, 215, 0, 1)']]
 
-    # Building the Parcoords with Font Fixes
     fig_para = go.Figure(data=go.Parcoords(
         labelfont=dict(size=14, color='black'),
         tickfont=dict(size=10, color='gray'),
-        line=line_settings,
+        line=dict(
+            color=color_vals,
+            colorscale=c_scale,
+            showscale=False
+        ),
         dimensions=list([
-            dict(range=[0.7, 1.0], label='Accuracy', values=final_plot_df['accuracy']),
-            dict(range=[0, 130], label='Latency', values=final_plot_df['latency']),
-            dict(range=[0, 16000], label='Usage', values=final_plot_df['usage']),
-            dict(range=[0, 0.25], label='Drift', values=final_plot_df['data_drift']),
-            dict(range=[0, 100], label='CPU %', values=final_plot_df['cpu_util'])
+            dict(range=[0.7, 1.0], label='Accuracy', values=plot_df['accuracy']),
+            dict(range=[0, 130], label='Latency', values=plot_df['latency']),
+            dict(range=[0, 16000], label='Usage', values=plot_df['usage']),
+            dict(range=[0, 0.25], label='Drift', values=plot_df['data_drift']),
+            dict(range=[0, 100], label='CPU %', values=plot_df['cpu_util'])
         ])
     ))
     
-    fig_para.update_layout(
-        margin=dict(t=100, b=50, l=70, r=70),
-        paper_bgcolor='white'
-    )
-
+    fig_para.update_layout(margin=dict(t=80, b=50, l=80, r=80), paper_bgcolor='white')
     st.plotly_chart(fig_para, use_container_width=True)
+    
     st.dataframe(plot_df[['name', 'domain', 'accuracy', 'usage', 'contributor']], use_container_width=True)
