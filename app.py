@@ -4,194 +4,215 @@ import plotly.express as px
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import os
+import datetime
+import random
 
-# --- CONFIG & STYLING ---
+# --- CONFIGURATION ---
 st.set_page_config(page_title="Accenture AI Marketplace", layout="wide")
 
-# Accenture CSS
+# CUSTOM CSS: Compact Cards, Responsive Grid, and Light Purple Multiselect Tags
 st.markdown("""
     <style>
-    :root { --accent-color: #A100FF; }
-    .stApp { background-color: #ffffff; }
-    .model-card {
-        border: 1px solid #e0e0e0; border-top: 4px solid #A100FF;
-        padding: 15px; background-color: #ffffff; margin-bottom: 20px;
-        height: 450px; display: flex; flex-direction: column; justify-content: space-between;
+    :root { --accent-purple: #A100FF; --light-purple: #F3E5F5; }
+    
+    /* 1. Light Purple Multiselect Tags */
+    span[data-baseweb="tag"] {
+        background-color: var(--light-purple) !important;
+        color: var(--accent-purple) !important;
+        border: 1px solid #D1C4E9 !important;
     }
-    .type-badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; float: right; }
-    .badge-official { background-color: #e8dbff; color: #A100FF; }
-    .badge-community { background-color: #f0f0f0; color: #666; }
-    .model-title { font-size: 1.1rem; font-weight: 700; color: #000; min-height: 50px; }
-    .metric-row { display: flex; justify-content: space-between; font-size: 0.75rem; border-top: 1px solid #eee; padding-top: 10px; }
-    div[data-testid="stForm"] button { background-color: #A100FF !important; color: white !important; }
-    .stButton>button { background-color: #000; color: white; border-radius: 0px; }
+    
+    /* 2. Compact Model Tiles */
+    .model-card {
+        border: 1px solid #e0e0e0;
+        border-top: 3px solid var(--accent-purple);
+        padding: 12px;
+        background-color: #ffffff;
+        margin-bottom: 10px;
+        min-height: 280px; /* Reduced from 450px */
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        border-radius: 4px;
+        transition: transform 0.2s;
+    }
+    .model-card:hover { transform: translateY(-3px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    
+    .model-header { display: flex; justify-content: space-between; align-items: flex-start; }
+    .domain-tag { font-size: 0.65rem; font-weight: bold; color: var(--accent-purple); text-transform: uppercase; }
+    .model-title { font-size: 0.95rem; font-weight: 700; color: #000; margin-top: 4px; line-height: 1.2; }
+    .model-desc { font-size: 0.8rem; color: #555; margin: 8px 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    
+    /* Metrics Row */
+    .compact-metrics { 
+        display: flex; 
+        justify-content: space-between; 
+        background: #f8f9fa; 
+        padding: 6px; 
+        border-radius: 4px;
+        font-size: 0.75rem;
+    }
+    
+    /* Buttons */
+    .stButton>button { background-color: #000; color: white; border-radius: 0px; height: 32px; font-size: 0.75rem; width: 100%; }
+    .stButton>button:hover { background-color: var(--accent-purple); }
     </style>
     """, unsafe_allow_html=True)
 
-# --- DATABASE PERSISTENCE LOGIC ---
-REGISTRY_FILE = "model_registry.csv"
-REQUESTS_FILE = "requests_log.csv"
+# --- PERSISTENCE LAYER ---
+REGISTRY_PATH = "model_registry.csv"
+REQUESTS_PATH = "requests_log.csv"
 
-def load_data():
-    if os.path.exists(REGISTRY_FILE):
-        return pd.read_csv(REGISTRY_FILE)
-    else:
-        # Initial Seed Data
-        data = []
+def init_storage():
+    if not os.path.exists(REGISTRY_PATH):
+        initial_data = []
         domains = ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Marketing", "Legal"]
         users = ["John Doe", "Jane Nu", "Sam King"]
-        for i in range(50):
-            dom = domains[i % len(domains)]
-            acc = round(0.75 + (i * 0.004), 2) # Mix of high/med/low
-            lat = 20 + (i * 2)
-            data.append({
-                "name": f"{dom}-Model-{i+100}", "domain": dom, "type": "Official" if i < 10 else "Community",
-                "accuracy": acc, "latency": lat, "clients": "Global Enterprise",
-                "use_cases": "Automated Processing", "description": f"Scalable {dom} intelligence asset.",
-                "contributor": "System" if i < 10 else users[i % 3], "usage": 100 + (i * 5)
+        for i in range(40):
+            acc = random.choice([0.99, 0.92, 0.75]) # High, Med, Low samples
+            lat = random.choice([30, 50, 80])       # Low, Med, High samples
+            initial_data.append({
+                "name": f"{random.choice(domains)}-{i+100}", "domain": random.choice(domains),
+                "type": "Official" if i < 10 else "Community", "accuracy": acc, "latency": lat,
+                "clients": "Fortune 500", "use_cases": "Enterprise Automation",
+                "description": "High-density model for specific business unit optimization.",
+                "contributor": "System" if i < 10 else random.choice(users), "usage": random.randint(100, 5000)
             })
-        df = pd.DataFrame(data)
-        df.to_csv(REGISTRY_FILE, index=False)
-        return df
+        pd.DataFrame(initial_data).to_csv(REGISTRY_PATH, index=False)
+    
+    if not os.path.exists(REQUESTS_PATH):
+        pd.DataFrame(columns=["model_name", "requester", "status", "timestamp"]).to_csv(REQUESTS_PATH, index=False)
 
-def load_requests():
-    if os.path.exists(REQUESTS_FILE):
-        return pd.read_csv(REQUESTS_FILE)
-    return pd.DataFrame(columns=["model_name", "requester", "status", "timestamp"])
+init_storage()
+registry_df = pd.read_csv(REGISTRY_PATH)
+requests_df = pd.read_csv(REQUESTS_PATH)
 
-def save_data(df, file):
-    df.to_csv(file, index=False)
-
-# Load data into memory
-if 'df' not in st.session_state:
-    st.session_state.df = load_data()
-if 'reqs' not in st.session_state:
-    st.session_state.reqs = load_requests()
-
-# --- SEARCH ENGINE ---
-def search_engine(query, df):
-    if not query: return df
-    df = df.copy()
-    df['blob'] = df.astype(str).apply(" ".join, axis=1)
-    vectorizer = TfidfVectorizer(stop_words='english')
-    matrix = vectorizer.fit_transform(df['blob'].tolist() + [query])
-    scores = cosine_similarity(matrix[-1], matrix[:-1])[0]
-    df['score'] = scores
-    return df[df['score'] > 0.01].sort_values('score', ascending=False)
-
-# --- SIDEBAR & AUTH ---
+# --- AUTH & NAVIGATION ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accenture.svg/2560px-Accenture.svg.png", width=120)
-    st.title("Gatekeeper")
-    current_user = st.selectbox("Login As:", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
+    user_role = st.selectbox("Login Profile", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
     st.divider()
     
-    # ACCURACY & LATENCY FILTERS
-    st.subheader("Advanced Filters")
-    acc_filter = st.multiselect("Accuracy Class", ["Highly Accurate (>98%)", "Medium (80-97%)", "Low (<80%)"], default=["Highly Accurate (>98%)", "Medium (80-97%)", "Low (<80%)"])
-    lat_filter = st.multiselect("Latency Class", ["Low (<40ms)", "Medium (41-60ms)", "High (>60ms)"], default=["Low (<40ms)", "Medium (41-60ms)", "High (>60ms)"])
+    st.subheader("Advanced Filtering")
+    # Filters mapping to requirements
+    acc_labels = st.multiselect("Accuracy Level", ["High (>98%)", "Medium (80-97%)", "Low (<80%)"], default=["High (>98%)", "Medium (80-97%)", "Low (<80%)"])
+    lat_labels = st.multiselect("Latency Level", ["Low (<40ms)", "Med (41-60ms)", "High (>60ms)"], default=["Low (<40ms)", "Med (41-60ms)", "High (>60ms)"])
 
-# --- FILTER LOGIC ---
-def apply_filters(df):
-    # Accuracy logic
-    acc_conditions = []
-    if "Highly Accurate (>98%)" in acc_filter: acc_conditions.append(df['accuracy'] >= 0.98)
-    if "Medium (80-97%)" in acc_filter: acc_conditions.append((df['accuracy'] >= 0.80) & (df['accuracy'] < 0.98))
-    if "Low (<80%)" in acc_filter: acc_conditions.append(df['accuracy'] < 0.80)
-    if acc_conditions: df = df[pd.concat(acc_conditions, axis=1).any(axis=1)]
-
-    # Latency logic
-    lat_conditions = []
-    if "Low (<40ms)" in lat_filter: lat_conditions.append(df['latency'] <= 40)
-    if "Medium (41-60ms)" in lat_filter: lat_conditions.append((df['latency'] > 40) & (df['latency'] <= 60))
-    if "High (>60ms)" in lat_filter: lat_conditions.append(df['latency'] > 60)
-    if lat_conditions: df = df[pd.concat(lat_conditions, axis=1).any(axis=1)]
+# --- HELPERS ---
+def filter_df(df):
+    # Map selection to actual data ranges
+    if not acc_labels: return pd.DataFrame()
+    acc_query = []
+    if "High (>98%)" in acc_labels: acc_query.append(df['accuracy'] >= 0.98)
+    if "Medium (80-97%)" in acc_labels: acc_query.append((df['accuracy'] >= 0.80) & (df['accuracy'] < 0.98))
+    if "Low (<80%)" in acc_labels: acc_query.append(df['accuracy'] < 0.80)
+    df = df[pd.concat(acc_query, axis=1).any(axis=1)]
+    
+    lat_query = []
+    if "Low (<40ms)" in lat_labels: lat_query.append(df['latency'] < 40)
+    if "Med (41-60ms)" in lat_labels: lat_query.append((df['latency'] >= 41) & (df['latency'] <= 60))
+    if "High (>60ms)" in lat_labels: lat_query.append(df['latency'] > 60)
+    df = df[pd.concat(lat_query, axis=1).any(axis=1)]
     return df
 
-# --- MAIN INTERFACE ---
-if current_user in ["John Doe", "Jane Nu", "Sam King"]:
-    st.title(f"Welcome, {current_user}")
-    t1, t2, t3 = st.tabs(["🏛 Model Gallery", "🚀 Contribute", "👤 My Dashboard"])
-
-    with t1:
-        query = st.text_input("Search Models by keyword, client or task...")
-        results = search_engine(query, apply_filters(st.session_state.df))
+# --- VIEW: CONSUMER (JOHN, JANE, SAM) ---
+if user_role in ["John Doe", "Jane Nu", "Sam King"]:
+    st.title(f"Consumer Hub: {user_role}")
+    t_gal, t_con, t_my = st.tabs(["🏛 Model Gallery", "🚀 Contribute Model", "👤 MyModels"])
+    
+    with t_gal:
+        q = st.text_input("Search models by keyword, client or task...")
+        # Search & Filter
+        display_df = filter_df(registry_df)
+        if q:
+            display_df['blob'] = display_df.astype(str).apply(' '.join, axis=1)
+            vectorizer = TfidfVectorizer(stop_words='english')
+            matrix = vectorizer.fit_transform(display_df['blob'].tolist() + [q])
+            display_df['score'] = cosine_similarity(matrix[-1], matrix[:-1])[0]
+            display_df = display_df[display_df['score'] > 0].sort_values('score', ascending=False)
         
-        for i in range(0, len(results), 3):
+        # Grid Display
+        for i in range(0, len(display_df), 3):
             cols = st.columns(3)
             for j in range(3):
-                if i+j < len(results):
-                    row = results.iloc[i+j]
+                if i+j < len(display_df):
+                    row = display_df.iloc[i+j]
                     with cols[j]:
-                        st.markdown(f"""<div class="model-card">
+                        st.markdown(f"""
+                        <div class="model-card">
                             <div>
-                                <span class="type-badge {'badge-official' if row['type']=='Official' else 'badge-community'}">{row['type']}</span>
-                                <div style="color:#A100FF; font-size:0.7rem; font-weight:bold;">{row['domain']}</div>
+                                <div class="model-header">
+                                    <span class="domain-tag">{row['domain']}</span>
+                                    <span class="type-badge {'badge-official' if row['type']=='Official' else 'badge-community'}">{row['type']}</span>
+                                </div>
                                 <div class="model-title">{row['name']}</div>
-                                <div style="font-size:0.8rem;">{row['description']}</div>
-                                <div style="font-size:0.7rem; color:gray; margin-top:5px;">Contributor: {row['contributor']}</div>
+                                <div class="model-desc">{row['description']}</div>
                             </div>
-                            <div class="metric-row">
-                                <span><b>ACC:</b> {int(row['accuracy']*100)}%</span>
-                                <span><b>LAT:</b> {row['latency']}ms</span>
+                            <div>
+                                <div class="compact-metrics">
+                                    <span><b>ACC:</b> {int(row['accuracy']*100)}%</span>
+                                    <span><b>LAT:</b> {row['latency']}ms</span>
+                                </div>
+                                <div style="font-size: 0.65rem; color: #888; margin: 4px 0;">By: {row['contributor']}</div>
                             </div>
-                        </div>""", unsafe_allow_html=True)
+                        </div>
+                        """, unsafe_allow_html=True)
                         if st.button("Request Access", key=f"req_{row['name']}"):
-                            new_req = pd.DataFrame([{"model_name": row['name'], "requester": current_user, "status": "Pending", "timestamp": str(datetime.datetime.now())}])
-                            st.session_state.reqs = pd.concat([st.session_state.reqs, new_req], ignore_index=True)
-                            save_data(st.session_state.reqs, REQUESTS_FILE)
-                            st.success("Request sent to Nat Patel.")
+                            new_req = pd.DataFrame([{"model_name": row['name'], "requester": user_role, "status": "Pending", "timestamp": str(datetime.datetime.now())}])
+                            pd.concat([requests_df, new_req]).to_csv(REQUESTS_PATH, index=False)
+                            st.toast("Request sent for approval.")
 
-    with t2:
-        with st.form("contribute", clear_on_submit=True):
-            n = st.text_input("Model Name")
-            d = st.selectbox("Domain", ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Marketing", "Legal"])
-            desc = st.text_area("Description")
-            acc_val = st.slider("Accuracy", 0.5, 1.0, 0.85)
-            lat_val = st.number_input("Latency (ms)", 5, 500, 50)
-            if st.form_submit_button("Submit Model"):
-                new_m = pd.DataFrame([{"name": n, "domain": d, "type": "Community", "accuracy": acc_val, "latency": lat_val, "clients": "Internal", "use_cases": "New Contribution", "description": desc, "contributor": current_user, "usage": 0}])
-                st.session_state.df = pd.concat([st.session_state.df, new_m], ignore_index=True)
-                save_data(st.session_state.df, REGISTRY_FILE)
-                st.success("Model Published and Persisted!")
+    with t_con:
+        with st.form("con_form", clear_on_submit=True):
+            st.subheader("New Intelligence Asset")
+            fn, fd = st.columns(2)
+            f_name = fn.text_input("Name")
+            f_dom = fd.selectbox("Domain", ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Marketing", "Legal"])
+            f_desc = st.text_area("Functionality Description")
+            f_acc = st.slider("Accuracy", 0.5, 1.0, 0.95)
+            f_lat = st.number_input("Latency (ms)", 5, 500, 35)
+            if st.form_submit_button("Publish Model"):
+                new_mod = pd.DataFrame([{"name": f_name, "domain": f_dom, "type": "Community", "accuracy": f_acc, "latency": f_lat, "clients": "Internal", "use_cases": "New Entry", "description": f_desc, "contributor": user_role, "usage": 0}])
+                pd.concat([registry_df, new_mod]).to_csv(REGISTRY_PATH, index=False)
+                st.success("Model persisted and searchable.")
 
-    with t3:
-        st.subheader("My Submissions & Performance")
-        my_mods = st.session_state.df[st.session_state.df['contributor'] == current_user]
-        if not my_mods.empty:
-            col_a, col_b = st.columns(2)
-            col_a.metric("Models Contributed", len(my_mods))
-            col_b.metric("Total Views/Usage", my_mods['usage'].sum())
-            st.dataframe(my_mods[['name', 'domain', 'accuracy', 'latency', 'usage']], use_container_width=True)
+    with t_my:
+        st.subheader("Your Impact Metrics")
+        user_mods = registry_df[registry_df['contributor'] == user_role]
+        if not user_mods.empty:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Assets", len(user_mods))
+            c2.metric("Total Usage", user_mods['usage'].sum())
+            c3.metric("Avg Quality", f"{int(user_mods['accuracy'].mean()*100)}%")
+            st.dataframe(user_mods[['name', 'domain', 'accuracy', 'usage']], use_container_width=True)
         else:
-            st.info("You haven't contributed any models yet.")
+            st.info("No contributions yet.")
 
-elif current_user == "Nat Patel (Leader)":
-    st.title("Leader Approval Queue")
-    st.subheader(f"Pending Requests for {current_user}")
-    pending = st.session_state.reqs[st.session_state.reqs['status'] == "Pending"]
+# --- VIEW: LEADER (NAT PATEL) ---
+elif user_role == "Nat Patel (Leader)":
+    st.title("Approval Portal: Nat Patel")
+    pending = requests_df[requests_df['status'] == "Pending"]
     if not pending.empty:
         for idx, row in pending.iterrows():
-            c1, c2, c3 = st.columns([2, 2, 1])
-            c1.write(f"**Model:** {row['model_name']}")
-            c2.write(f"**User:** {row['requester']}")
-            if c3.button("Approve", key=f"app_{idx}"):
-                st.session_state.reqs.at[idx, 'status'] = "Approved"
-                save_data(st.session_state.reqs, REQUESTS_FILE)
+            col_a, col_b, col_c = st.columns([3, 2, 1])
+            col_a.write(f"**{row['requester']}** wants access to **{row['model_name']}**")
+            if col_c.button("Approve", key=f"ap_{idx}"):
+                requests_df.at[idx, 'status'] = "Approved"
+                requests_df.to_csv(REQUESTS_PATH, index=False)
                 st.rerun()
     else:
-        st.success("All requests cleared.")
+        st.success("No pending approvals.")
 
-elif current_user == "Admin":
-    st.title("Marketplace Administration")
-    tabs = st.tabs(["Marketplace Metrics", "Request Logs", "All Models"])
+# --- VIEW: ADMIN ---
+else:
+    st.title("Enterprise Governance")
+    tabs = st.tabs(["Global Analytics", "Audit Logs"])
     with tabs[0]:
-        c1, c2 = st.columns(2)
-        fig1 = px.sunburst(st.session_state.df, path=['domain', 'type'], values='usage', title="Usage by Domain")
-        c1.plotly_chart(fig1)
-        fig2 = px.scatter(st.session_state.df, x='accuracy', y='latency', color='type', size='usage', hover_name='name', title="Accuracy vs Latency")
-        c2.plotly_chart(fig2)
+        col1, col2 = st.columns(2)
+        fig = px.bar(registry_df, x='domain', y='usage', color='type', barmode='group', title="Usage by Business Unit")
+        col1.plotly_chart(fig, use_container_width=True)
+        fig2 = px.scatter(registry_df, x='accuracy', y='latency', color='domain', size='usage', title="Asset Portfolio Distribution")
+        col2.plotly_chart(fig2, use_container_width=True)
     with tabs[1]:
-        st.dataframe(st.session_state.reqs, use_container_width=True)
-    with tabs[2]:
-        st.dataframe(st.session_state.df, use_container_width=True)
+        st.subheader("Access History")
+        st.dataframe(requests_df, use_container_width=True)
