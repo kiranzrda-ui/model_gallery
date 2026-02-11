@@ -9,7 +9,7 @@ import datetime
 import random
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Accenture AI Marketplace | 1000+ Assets", layout="wide")
+st.set_page_config(page_title="Accenture AI Marketplace | 1,000+ Assets", layout="wide")
 
 st.markdown("""
     <style>
@@ -34,16 +34,21 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- PERSISTENCE & GENERATOR ---
+# --- PERSISTENCE & ROBUST GENERATOR ---
 REG_PATH = "model_registry_v3.csv"
 LOG_PATH = "search_logs_v3.csv"
 REQ_PATH = "requests_v3.csv"
 
 def init_files():
-    # Priority 1: Check if file exists in Git/Local
+    # If file is missing or too small, regenerate 1000 models
+    should_generate = False
     if not os.path.exists(REG_PATH):
-        st.warning("Registry CSV not found. Generating 1,000 enterprise models...")
-        
+        should_generate = True
+    else:
+        existing_df = pd.read_csv(REG_PATH)
+        if len(existing_df) < 100: should_generate = True
+
+    if should_generate:
         doms = ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Legal", "Marketing", "ESG", "R&D"]
         clients = ["Apple", "NASA", "Amazon", "Coca-Cola", "BMW", "Samsung", "Walmart", "FedEx", "Meta", "Microsoft", "JP Morgan", "Shell", "Toyota", "AstraZeneca"]
         prefixes = ["Neural", "Quantum", "Optimus", "Insight", "Flow", "Secure", "Alpha", "Delta", "Core"]
@@ -51,26 +56,31 @@ def init_files():
         users = ["John Doe", "Jane Nu", "Sam King"]
 
         data = []
-        # Add the two specific samples first
-        data.append({"name": "Fin-Audit-GPT", "domain": "Finance", "type": "Official", "accuracy": 0.98, "latency": 35, "clients": "JP Morgan, Goldman Sachs", "use_cases": "Audit Automation", "description": "High-precision LLM for detecting non-compliant transactions.", "contributor": "System", "usage": 8500, "data_drift": 0.012, "pred_drift": 0.015, "cpu_util": 45, "mem_util": 8, "throughput": 450, "error_rate": 0.02})
-        data.append({"name": "Tax-Compliance-Pro", "domain": "Finance", "type": "Official", "accuracy": 0.94, "latency": 45, "clients": "HSBC, Barclays", "use_cases": "Tax Mapping", "description": "Automates tax code mapping for cross-border trade.", "contributor": "System", "usage": 6200, "data_drift": 0.021, "pred_drift": 0.025, "cpu_util": 30, "mem_util": 4, "throughput": 210, "error_rate": 0.05})
-
-        # Generate 998 more models
-        for i in range(998):
+        # Generate exactly 1000 models
+        for i in range(1000):
             d = random.choice(doms)
             c_list = ", ".join(random.sample(clients, 2))
             acc = round(random.uniform(0.70, 0.99), 3)
             lat = random.randint(10, 150)
+            
+            # Allocation Logic: First 200 are System/Official, others split between the 3 users
+            if i < 200:
+                contributor = "System"
+                m_type = "Official"
+            else:
+                contributor = random.choice(users)
+                m_type = "Community"
+
             data.append({
-                "name": f"{random.choice(prefixes)}-{d}-{random.choice(suffixes)}-{i+500}",
+                "name": f"{random.choice(prefixes)}-{d}-{random.choice(suffixes)}-{i+1000}",
                 "domain": d,
-                "type": "Official" if i < 150 else "Community",
+                "type": m_type,
                 "accuracy": acc,
                 "latency": lat,
                 "clients": c_list,
                 "use_cases": f"Optimization for {d} workflows",
-                "description": f"Proprietary {d} architecture designed for high-concurrency enterprise workloads. Optimized for {c_list} specifically.",
-                "contributor": "System" if i < 150 else random.choice(users),
+                "description": f"Proprietary {d} architecture designed for high-concurrency enterprise workloads. Integrated for {c_list}.",
+                "contributor": contributor,
                 "usage": random.randint(10, 20000),
                 "data_drift": round(random.uniform(0, 0.25), 3),
                 "pred_drift": round(random.uniform(0, 0.25), 3),
@@ -85,15 +95,14 @@ def init_files():
     if not os.path.exists(REQ_PATH): pd.DataFrame(columns=["model_name", "requester", "status", "timestamp"]).to_csv(REQ_PATH, index=False)
 
 init_files()
-# Explicitly read the CSV
 df_master = pd.read_csv(REG_PATH)
 search_logs = pd.read_csv(LOG_PATH)
 req_log = pd.read_csv(REQ_PATH)
 
-# --- SIDEBAR AUTH ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Accenture.svg/2560px-Accenture.svg.png", width=120)
-    current_user = st.selectbox("Identity Profile", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
+    current_user = st.selectbox("Login Profile", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
     st.divider()
     st.subheader("Performance Tiers")
     acc_sel = st.multiselect("Accuracy", ["High (>98%)", "Medium (80-97%)", "Low (<80%)"], default=["High (>98%)", "Medium (80-97%)"])
@@ -112,13 +121,13 @@ def filter_registry(df):
     if "High (>60ms)" in lat_sel: m_lat |= (df['latency'] > 60)
     return df[m_lat]
 
-# --- VIEW: CONSUMER (JOHN, JANE, SAM) ---
+# --- VIEWS ---
 if current_user in ["John Doe", "Jane Nu", "Sam King"]:
     st.title(f"Consumer Hub | {current_user}")
     t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🚀 Contribute Asset", "👤 My Dashboard"])
     
     with t1:
-        q = st.text_input("💬 Chat Search: Find by client, task, or performance", placeholder="e.g. 'NASA accuracy'")
+        q = st.text_input("💬 Search 1,000+ Models (Client, Task, Performance)", placeholder="e.g. 'NASA accuracy'")
         display_df = filter_registry(df_master)
         if q:
             display_df['blob'] = display_df.astype(str).apply(' '.join, axis=1)
@@ -129,8 +138,7 @@ if current_user in ["John Doe", "Jane Nu", "Sam King"]:
             new_log = pd.DataFrame([{"query": q, "found": len(display_df), "timestamp": str(datetime.datetime.now())}])
             pd.concat([search_logs, new_log]).to_csv(LOG_PATH, index=False)
 
-        st.caption(f"Showing {min(len(display_df), 30)} of {len(display_df)} models matched.")
-        # Only show top 30 to keep UI responsive
+        st.caption(f"Search results: {len(display_df)} models matched. Displaying top 30.")
         for i in range(0, min(len(display_df), 30), 3):
             cols = st.columns(3)
             for j in range(3):
@@ -146,6 +154,7 @@ if current_user in ["John Doe", "Jane Nu", "Sam King"]:
                                 <div class="model-title">{row['name']}</div>
                                 <div class="client-tag">Clients: {row['clients']}</div>
                                 <div class="model-desc">{row['description']}</div>
+                                <div style="font-size:0.65rem; color:#888;">By: {row['contributor']}</div>
                             </div>
                             <div class="metric-box">
                                 <span><b>ACC:</b> {int(row['accuracy']*100)}%</span>
@@ -169,29 +178,43 @@ if current_user in ["John Doe", "Jane Nu", "Sam King"]:
             in_desc = st.text_area("Detailed Description")
             if st.form_submit_button("Publish"):
                 new_row = pd.DataFrame([{"name": in_name, "domain": in_dom, "type": "Community", "accuracy": 0.88, "latency": 35, "clients": in_cls, "description": in_desc, "contributor": current_user, "usage": 0, "data_drift": 0.01, "cpu_util": 15, "mem_util": 4, "throughput": 100, "error_rate": 0.01}])
-                pd.concat([df_master, new_row]).to_csv(REG_PATH, index=False)
-                st.success("Ingested!")
+                df_master = pd.concat([df_master, new_row])
+                df_master.to_csv(REG_PATH, index=False)
+                st.success("Asset added to your portfolio!")
 
     with t3:
+        # DATA SCIENTIST PERSONAL DASHBOARD
         my_m = df_master[df_master['contributor'] == current_user]
         if not my_m.empty:
-            st.subheader("Asset Telemetry Radar")
-            sel_m = st.selectbox("Inspect Asset", my_m['name'])
+            st.subheader(f"Portfolio Metrics for {current_user}")
+            col_k1, col_k2, col_k3 = st.columns(3)
+            col_k1.metric("Models Contributed", len(my_m))
+            col_k2.metric("Aggregate Usage", f"{my_m['usage'].sum():,}")
+            col_k3.metric("Avg Portfolio Accuracy", f"{int(my_m['accuracy'].mean()*100)}%")
+            
+            st.divider()
+            sel_m = st.selectbox("Inspect Asset Deep-Dive", my_m['name'])
             m_dat = my_m[my_m['name'] == sel_m].iloc[0]
-            # Radar/Spider Chart
-            fig_radar = go.Figure(go.Scatterpolar(
-                r=[m_dat['accuracy']*100, 100-m_dat['data_drift']*100, 100-m_dat['cpu_util'], 100-m_dat['error_rate']*10],
-                theta=['Accuracy', 'Stability', 'Efficiency', 'Reliability'],
-                fill='toself', line_color='#A100FF'
-            ))
-            fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False, height=400)
-            st.plotly_chart(fig_radar, use_container_width=True)
+            
+            col_r, col_t = st.columns([2, 1])
+            with col_r:
+                fig_radar = go.Figure(go.Scatterpolar(
+                    r=[m_dat['accuracy']*100, 100-m_dat['data_drift']*100, 100-m_dat['cpu_util'], 100-m_dat['error_rate']*10],
+                    theta=['Accuracy', 'Stability', 'Efficiency', 'Reliability'],
+                    fill='toself', line_color='#A100FF'
+                ))
+                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False, title="Model Health Radar")
+                st.plotly_chart(fig_radar, use_container_width=True)
+            with col_t:
+                st.write("**Asset Runtime Stats**")
+                st.info(f"Throughput: {m_dat['throughput']} req/s")
+                st.info(f"CPU Utilization: {m_dat['cpu_util']}%")
+                st.info(f"Memory: {m_dat['mem_util']} GB")
         else:
-            st.info("No contributions found.")
+            st.info("No models found. Go to 'Contribute Asset' to start your portfolio.")
 
-# --- LEADER VIEW ---
 elif current_user == "Nat Patel (Leader)":
-    st.title("Leader Gateway")
+    st.title("Leader Approval Gateway")
     pend = req_log[req_log['status'] == "Pending"]
     if not pend.empty:
         for idx, r in pend.iterrows():
@@ -203,22 +226,17 @@ elif current_user == "Nat Patel (Leader)":
     else:
         st.success("No pending approvals.")
 
-# --- ADMIN VIEW ---
-else:
-    st.title("Global Admin Governance")
+else: # ADMIN VIEW
+    st.title("Admin Governance Dashboard")
     k1, k2, k3 = st.columns(3)
-    k1.metric("Total API Usage", f"{df_master['usage'].sum():,}")
+    k1.metric("Global Usage Volume", f"{df_master['usage'].sum():,}")
     if len(search_logs) > 0:
         eff = (len(search_logs[search_logs['found'] > 0]) / len(search_logs)) * 100
         k2.metric("Search Efficacy", f"{int(eff)}%")
     k3.metric("Inventory Size", len(df_master))
     
-    # DOWNLOAD OPTION FOR GIT COMMIT
-    st.download_button("Download Current CSV for Git", df_master.to_csv(index=False), "model_registry_v3.csv", "text/csv")
-
     st.divider()
     st.subheader("Interactive Portfolio Inspector")
-    
     admin_q = st.text_input("🔍 Filter Fleet View (Search)", placeholder="e.g. 'NASA'")
     plot_df = df_master.copy()
     if admin_q:
