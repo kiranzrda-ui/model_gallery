@@ -19,78 +19,62 @@ st.markdown("""
     .model-card {
         border: 1px solid #e0e0e0; border-top: 4px solid var(--accent);
         padding: 12px; background-color: #ffffff; margin-bottom: 15px;
-        min-height: 380px; display: flex; flex-direction: column; justify-content: space-between;
+        min-height: 400px; display: flex; flex-direction: column; justify-content: space-between;
         border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
-    .model-title { font-size: 1rem; font-weight: 700; color: #000; margin-bottom: 2px; }
+    .model-title { font-size: 1.1rem; font-weight: 700; color: #000; margin-bottom: 2px; }
     .client-tag { font-size: 0.75rem; color: var(--accent); font-weight: 600; margin-bottom: 5px; }
-    .model-desc { font-size: 0.8rem; color: #444; line-height: 1.3; margin-bottom: 8px; 
-                  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-    .metric-box { background: #f8f9fa; padding: 6px; border-radius: 4px; display: flex; justify-content: space-between; font-size: 0.7rem; }
-    .stButton>button { background-color: #000; color: #fff; border-radius: 0; font-size: 0.8rem; height: 32px; width: 100%; }
+    .model-desc { font-size: 0.85rem; color: #444; line-height: 1.4; margin-bottom: 8px; 
+                  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+    .metric-box { background: #f8f9fa; padding: 6px; border-radius: 4px; display: flex; justify-content: space-between; font-size: 0.75rem; }
+    .stButton>button { background-color: #000; color: #fff; border-radius: 0; font-size: 0.8rem; height: 35px; width: 100%; }
     .stButton>button:hover { background-color: var(--accent); }
     </style>
     """, unsafe_allow_html=True)
 
-# --- ROBUST DATA PERSISTENCE ---
+# --- REALISTIC SEED DATA ---
+REAL_MODELS = [
+    {"name": "BERT-Sentiment-Pro", "domain": "Marketing", "type": "Official", "accuracy": 0.94, "latency": 25, "clients": "Coca-Cola, Samsung", "use_cases": "Brand Sentiment Analysis", "description": "A fine-tuned BERT model for real-time sentiment analysis of social media feeds and customer reviews. High precision in detecting sarcasm and brand-specific emotions.", "contributor": "System"},
+    {"name": "Prophet-Cashflow-V4", "domain": "Finance", "type": "Official", "accuracy": 0.88, "latency": 110, "clients": "JP Morgan, HSBC", "use_cases": "Forecasting Cash Reserves", "description": "Time-series forecasting model using the Prophet library. Designed to predict quarterly cash flow cycles with seasonality adjustments for global banking holidays.", "contributor": "System"},
+    {"name": "XGBoost-Fraud-Shield", "domain": "Finance", "type": "Official", "accuracy": 0.99, "latency": 12, "clients": "Barclays, Shell", "use_cases": "Credit Card Fraud Detection", "description": "Ultra-low latency gradient boosting model for transactional fraud detection. Trained on millions of anonymized payment records to identify high-risk anomalies in real-time.", "contributor": "System"},
+    {"name": "Supply-Chain-Twin", "domain": "Supply Chain", "type": "Official", "accuracy": 0.91, "latency": 65, "clients": "FedEx, Walmart", "use_cases": "Inventory Optimization", "description": "Digital twin simulator powered by reinforcement learning. Optimizes stock levels across multi-node distribution centers while reducing logistics costs.", "contributor": "System"},
+    {"name": "Legal-Clause-Extractor", "domain": "Legal", "type": "Official", "accuracy": 0.85, "latency": 450, "clients": "Apple, Toyota", "use_cases": "Contract Risk Analysis", "description": "NLP transformer model specializing in Named Entity Recognition (NER) for legal documents. Automatically flags non-standard liability and termination clauses in vendor contracts.", "contributor": "System"},
+    {"name": "HR-Retention-Pulse", "domain": "HR", "type": "Official", "accuracy": 0.82, "latency": 35, "clients": "Google, Meta", "use_cases": "Employee Churn Prediction", "description": "Predictive classifier that analyzes engagement scores and work patterns to identify high-risk flight profiles. Built with ethical AI constraints to remove demographic bias.", "contributor": "System"}
+]
+
+# --- PERSISTENCE ENGINE ---
 REG_PATH = "model_registry_v3.csv"
 LOG_PATH = "search_logs_v3.csv"
 REQ_PATH = "requests_v3.csv"
 
-def generate_1000_models():
-    """Generates a high-quality dataset and returns a DataFrame."""
-    doms = ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Legal", "Marketing", "ESG", "R&D"]
-    clients = ["Apple", "NASA", "Amazon", "Coca-Cola", "BMW", "Samsung", "Walmart", "FedEx", "Meta", "Microsoft", "JP Morgan", "Shell", "Toyota", "AstraZeneca"]
-    prefixes = ["Neural", "Quantum", "Optimus", "Insight", "Flow", "Secure", "Alpha", "Delta", "Core"]
-    suffixes = ["Engine", "GPT", "V4", "Classifier", "Bot", "Forecaster", "Sentinel", "Analyst"]
-    users = ["John Doe", "Jane Nu", "Sam King"]
-
-    data = []
-    for i in range(1000):
-        d = random.choice(doms)
-        # Select 2 unique clients and join with a pipe or ensure quoted later
-        c_list = ", ".join(random.sample(clients, 2))
-        
-        # User Mapping: Split 1000 models between System and the 3 Data Scientists
-        if i < 200:
-            contributor, m_type = "System", "Official"
-        else:
-            contributor = users[i % 3] # Perfectly balanced mapping
-            m_type = "Community"
-
-        data.append({
-            "name": f"{random.choice(prefixes)}-{d}-{random.choice(suffixes)}-{i+1000}",
-            "domain": d,
-            "type": m_type,
-            "accuracy": round(random.uniform(0.70, 0.99), 3),
-            "latency": random.randint(10, 150),
-            "clients": c_list,
-            "use_cases": f"Hyper-optimization for {d} processes",
-            "description": f"Proprietary {d} architecture designed for high-concurrency workloads. Standardized for {c_list} operations.",
-            "contributor": contributor,
-            "usage": random.randint(10, 25000),
-            "data_drift": round(random.uniform(0, 0.25), 3),
-            "pred_drift": round(random.uniform(0, 0.25), 3),
-            "cpu_util": random.randint(5, 95),
-            "mem_util": random.randint(2, 64),
-            "throughput": random.randint(10, 3500),
-            "error_rate": round(random.uniform(0, 5), 2)
-        })
-    return pd.DataFrame(data)
-
 def init_files():
-    # If registry is missing or corrupted, regenerate
-    try:
-        if os.path.exists(REG_PATH):
-            test_df = pd.read_csv(REG_PATH)
-            if len(test_df) < 500: # If it's a small or old version, force update
-                raise ValueError("Outdated registry size")
-        else:
-            raise FileNotFoundError()
-    except Exception:
-        df = generate_1000_models()
-        # QUOTE_ALL prevents parsing errors from commas inside cells
-        df.to_csv(REG_PATH, index=False, quoting=csv.QUOTE_ALL)
+    """Ensures CSVs exist and are populated with 1000 models."""
+    if not os.path.exists(REG_PATH):
+        doms = ["Finance", "HR", "Procurement", "Supply Chain", "IT", "Legal", "Marketing", "ESG", "R&D"]
+        clients = ["Apple", "NASA", "Amazon", "Coca-Cola", "BMW", "Samsung", "Walmart", "FedEx", "Meta", "Microsoft", "JP Morgan", "Shell", "Toyota", "AstraZeneca"]
+        users = ["John Doe", "Jane Nu", "Sam King"]
+
+        data = []
+        # Add real seeds
+        for m in REAL_MODELS:
+            m.update({"usage": random.randint(5000, 20000), "data_drift": 0.02, "pred_drift": 0.02, "cpu_util": 35, "mem_util": 8, "throughput": 500, "error_rate": 0.01})
+            data.append(m)
+
+        # Generate up to 1000
+        for i in range(len(data), 1000):
+            d = random.choice(doms)
+            c_list = ", ".join(random.sample(clients, 2))
+            contributor = users[i % 3]
+            data.append({
+                "name": f"{random.choice(['Neural', 'Core', 'Alpha', 'Quantum'])}-{d}-v{i}",
+                "domain": d, "type": "Community", "accuracy": round(random.uniform(0.70, 0.99), 3),
+                "latency": random.randint(10, 250), "clients": c_list, "use_cases": f"Optimization for {d}",
+                "description": f"Standard {d} optimization model built for enterprise scale. Trained on global datasets for {c_list}.",
+                "contributor": contributor, "usage": random.randint(10, 5000), "data_drift": round(random.uniform(0, 0.25), 3),
+                "pred_drift": 0.05, "cpu_util": random.randint(5, 95), "mem_util": random.randint(2, 64),
+                "throughput": random.randint(10, 2000), "error_rate": round(random.uniform(0, 5), 2)
+            })
+        pd.DataFrame(data).to_csv(REG_PATH, index=False, quoting=csv.QUOTE_ALL)
     
     if not os.path.exists(LOG_PATH): pd.DataFrame(columns=["query", "found", "timestamp"]).to_csv(LOG_PATH, index=False)
     if not os.path.exists(REQ_PATH): pd.DataFrame(columns=["model_name", "requester", "status", "timestamp"]).to_csv(REQ_PATH, index=False)
@@ -128,7 +112,7 @@ if current_user in ["John Doe", "Jane Nu", "Sam King"]:
     t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🚀 Contribute Asset", "👤 My Dashboard"])
     
     with t1:
-        q = st.text_input("💬 Search 1,000+ Models (Clients, Tasks, Hardware)", placeholder="e.g. 'NASA accuracy'")
+        q = st.text_input("💬 Chat Search: Describe a client name or model description keyword...", placeholder="e.g. 'NASA high accuracy' or 'sentiment'")
         display_df = filter_registry(df_master)
         if q:
             display_df['blob'] = display_df.astype(str).apply(' '.join, axis=1)
@@ -139,7 +123,7 @@ if current_user in ["John Doe", "Jane Nu", "Sam King"]:
             new_log = pd.DataFrame([{"query": q, "found": len(display_df), "timestamp": str(datetime.datetime.now())}])
             pd.concat([search_logs, new_log]).to_csv(LOG_PATH, index=False)
 
-        st.caption(f"Matches: {len(display_df)} models. Showing top 30.")
+        st.caption(f"Showing {len(display_df)} models matched.")
         for i in range(0, min(len(display_df), 30), 3):
             cols = st.columns(3)
             for j in range(3):
@@ -155,11 +139,12 @@ if current_user in ["John Doe", "Jane Nu", "Sam King"]:
                                 <div class="model-title">{row['name']}</div>
                                 <div class="client-tag">Clients: {row['clients']}</div>
                                 <div class="model-desc">{row['description']}</div>
+                                <div style="font-size:0.65rem; color:#888;">By: {row['contributor']}</div>
                             </div>
                             <div class="metric-box">
                                 <span><b>ACC:</b> {int(row['accuracy']*100)}%</span>
                                 <span><b>LAT:</b> {row['latency']}ms</span>
-                                <span><b>VIEWS:</b> {row['usage']}</span>
+                                <span><b>USE:</b> {row['usage']}</span>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
@@ -172,15 +157,24 @@ if current_user in ["John Doe", "Jane Nu", "Sam King"]:
         with st.form("ingest_form", clear_on_submit=True):
             st.subheader("Model Metadata Ingestion")
             c1, c2 = st.columns(2)
-            in_name = c1.text_input("Asset Name")
-            in_dom = c2.selectbox("Domain", ["Finance", "HR", "Supply Chain", "IT", "Legal"])
-            in_cls = st.text_input("Client Projects")
-            in_desc = st.text_area("Detailed Description")
-            if st.form_submit_button("Publish"):
-                new_row = pd.DataFrame([{"name": in_name, "domain": in_dom, "type": "Community", "accuracy": 0.88, "latency": 35, "clients": in_cls, "description": in_desc, "contributor": current_user, "usage": 0, "data_drift": 0.01, "cpu_util": 15, "mem_util": 4, "throughput": 100, "error_rate": 0.01}])
-                df_master = pd.concat([df_master, new_row])
-                df_master.to_csv(REG_PATH, index=False, quoting=csv.QUOTE_ALL)
-                st.success("Successfully added to your portfolio!")
+            in_name = c1.text_input("Asset Name", placeholder="e.g. Sales-Forecaster-v1")
+            in_dom = c2.selectbox("Domain", ["Finance", "HR", "Supply Chain", "IT", "Legal", "Marketing"])
+            in_cls = st.text_input("Client Projects", placeholder="e.g. Shell, Walmart")
+            in_desc = st.text_area("Detailed Description (Keywords entered here help search ranking)", help="Example: This model uses XGBoost for predicting invoice fraud.")
+            if st.form_submit_button("Publish to Marketplace"):
+                if in_name and in_desc:
+                    new_row = pd.DataFrame([{
+                        "name": in_name, "domain": in_dom, "type": "Community", "accuracy": 0.88, "latency": 35, 
+                        "clients": in_cls, "description": in_desc, "contributor": current_user, "usage": 0, 
+                        "data_drift": 0.01, "pred_drift": 0.01, "cpu_util": 15, "mem_util": 4, "throughput": 100, "error_rate": 0.01,
+                        "use_cases": "New Entry"
+                    }])
+                    # APPEND TO MASTER AND SAVE TO CSV
+                    df_master = pd.concat([df_master, new_row], ignore_index=True)
+                    df_master.to_csv(REG_PATH, index=False, quoting=csv.QUOTE_ALL)
+                    st.success(f"Success! '{in_name}' has been added to the registry and is now searchable.")
+                else:
+                    st.error("Model Name and Description are required.")
 
     with t3:
         my_m = df_master[df_master['contributor'] == current_user]
@@ -202,7 +196,7 @@ if current_user in ["John Doe", "Jane Nu", "Sam King"]:
                     theta=['Accuracy', 'Stability', 'Efficiency', 'Reliability'],
                     fill='toself', line_color='#A100FF'
                 ))
-                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
+                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False, title="Model Health Radar")
                 st.plotly_chart(fig_radar, use_container_width=True)
             with col_t:
                 st.write("**Runtime Telemetry**")
@@ -235,7 +229,7 @@ else: # ADMIN VIEW
     
     st.divider()
     st.subheader("Interactive Portfolio Inspector")
-    admin_q = st.text_input("🔍 Search to narrow fleet view...", placeholder="e.g. 'NASA'")
+    admin_q = st.text_input("🔍 Search to filter fleet view...", placeholder="e.g. 'NASA'")
     plot_df = df_master.copy()
     if admin_q:
         plot_df['blob'] = plot_df.astype(str).apply(' '.join, axis=1)
@@ -260,12 +254,11 @@ else: # ADMIN VIEW
         line=dict(color=color_vals, colorscale=c_scale, showscale=False),
         dimensions=list([
             dict(range=[0.7, 1.0], label='Accuracy', values=plot_df['accuracy']),
-            dict(range=[0, 155], label='Latency', values=plot_df['latency']),
-            dict(range=[0, 25500], label='Usage', values=plot_df['usage']),
+            dict(range=[0, 250], label='Latency', values=plot_df['latency']),
+            dict(range=[0, 25000], label='Usage', values=plot_df['usage']),
             dict(range=[0, 0.3], label='Drift', values=plot_df['data_drift']),
             dict(range=[0, 100], label='CPU %', values=plot_df['cpu_util'])
         ])
     ))
     fig_para.update_layout(margin=dict(t=100, b=50, l=100, r=100), paper_bgcolor='white', height=550)
     st.plotly_chart(fig_para, use_container_width=True)
-    st.dataframe(plot_df[['name', 'domain', 'accuracy', 'usage', 'contributor']], use_container_width=True)
