@@ -7,106 +7,99 @@ from sklearn.metrics.pairwise import cosine_similarity
 import os
 import datetime
 import random
-import json
 import re
+import csv
 
-# --- CONFIG & COMPACT STYLING ---
-st.set_page_config(page_title="Enterprise Model Hub", layout="wide")
+# --- CONFIG & STYLING ---
+st.set_page_config(page_title="Model Hub 2.0", layout="wide")
 
 st.markdown("""
     <style>
-    :root { --accent: #6200EE; --bg: #F4F7F9; --card: #FFFFFF; }
-    .stApp { background-color: var(--bg); }
+    :root { --accent: #6200EE; --success: #2E7D32; --warning: #F9A825; --critical: #C62828; }
+    .stApp { background-color: #F4F7F9; }
     
-    /* Compact Model Card */
+    /* Compact Card UI */
     .model-card {
-        background: var(--card); border: 1px solid #e0e6ed; border-top: 3px solid var(--accent);
-        padding: 12px; border-radius: 6px; min-height: 320px; 
+        background: white; border: 1px solid #e0e6ed; border-top: 3px solid var(--accent);
+        padding: 12px; border-radius: 6px; min-height: 340px; 
         display: flex; flex-direction: column; justify-content: space-between;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: 0.2s;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .model-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .model-title { font-size: 0.95rem; font-weight: 700; color: #1a202c; display: flex; justify-content: space-between; }
+    .registry-badge { font-size: 0.6rem; padding: 2px 5px; border-radius: 4px; background: #EDF2F7; color: #4A5568; border: 1px solid #CBD5E0; }
     
-    .model-title { font-size: 0.95rem; font-weight: 700; color: #1a202c; margin-bottom: 2px; display: flex; justify-content: space-between; }
-    .registry-badge { font-size: 0.6rem; padding: 2px 5px; border-radius: 4px; background: #EDF2F7; color: #4A5568; font-family: monospace; border: 1px solid #CBD5E0; }
+    .meta-line { font-size: 0.72rem; color: #718096; margin: 1px 0; }
+    .use-case-text { font-size: 0.75rem; color: #4A5568; margin: 8px 0; height: 3.2em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     
-    .meta-row { font-size: 0.72rem; color: #718096; margin: 2px 0; display: flex; justify-content: space-between; }
-    .tag-purple { color: var(--accent); font-weight: 600; }
-    
-    .use-case-text { font-size: 0.75rem; color: #4A5568; margin: 8px 0; line-height: 1.3; height: 3.9em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-    
-    .metric-bar { display: flex; justify-content: space-between; background: #F8FAFC; padding: 6px; border-radius: 4px; border: 1px solid #E2E8F0; }
+    .metric-bar { display: flex; justify-content: space-between; background: #F8FAFC; padding: 5px; border-radius: 4px; border: 1px solid #E2E8F0; }
     .metric-val { font-size: 0.8rem; font-weight: 700; color: var(--accent); text-align: center; flex: 1; }
-    .metric-label { font-size: 0.6rem; color: #A0AEC0; display: block; text-transform: uppercase; }
+    .metric-label { font-size: 0.55rem; color: #A0AEC0; display: block; text-transform: uppercase; }
 
-    /* Buttons */
-    .stButton>button { background-color: #1A202C; color: white; border-radius: 4px; font-size: 0.75rem; height: 30px; width: 100%; border:none; }
-    .stButton>button:hover { background-color: var(--accent); }
+    /* Button Consistency */
+    .stButton>button { border-radius: 4px; font-size: 0.75rem; height: 28px; width: 100%; }
+    .stDownloadButton>button { background-color: var(--accent) !important; color: white !important; width: 100%; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- DATA LAYER & CONNECTORS ---
+# --- DATA PERSISTENCE ---
 REG_PATH = "model_registry_v3.csv"
 REQ_PATH = "requests_v3.csv"
+LOG_PATH = "search_logs_v3.csv"
 
-def init_registry():
+# Initialize Session State for the "Compare Basket"
+if 'compare_basket' not in st.session_state:
+    st.session_state.compare_basket = []
+
+def load_data():
     if not os.path.exists(REG_PATH):
-        st.error("Registry not found. Creating simulated enterprise data...")
-        # (Generation logic similar to previous but with MLflow/Vertex/SageMaker IDs)
+        st.error("Registry CSV missing. Please upload model_registry_v3.csv")
         return pd.DataFrame()
     df = pd.read_csv(REG_PATH)
-    # Ensure Connector Fields
-    for col in ['registry_provider', 'run_id', 'revenue_impact', 'risk_exposure']:
-        if col not in df.columns:
-            df['registry_provider'] = [random.choice(['MLflow', 'Vertex AI', 'SageMaker']) for _ in range(len(df))]
-            df['run_id'] = [f"run_{random.randint(1000,9999)}" for _ in range(len(df))]
-            df['revenue_impact'] = df['usage'] * random.uniform(5, 20)
-            df['risk_exposure'] = (1 - df['accuracy']) * 100000
+    # Ensure Enterprise ROI Columns exist
+    if 'revenue_impact' not in df.columns:
+        df['revenue_impact'] = df['usage'] * 15.5
+        df['registry_provider'] = [random.choice(['MLflow', 'Vertex AI', 'SageMaker']) for _ in range(len(df))]
     return df
 
-df_master = init_registry()
+df_master = load_data()
 
-if 'compare_list' not in st.session_state:
-    st.session_state.compare_list = []
-
-# --- ANALYTICS ENGINES ---
-def get_recommendations(query, df):
+# --- SEARCH ENGINE ---
+def run_advanced_search(query, df):
     if not query: return df
-    df = df.fillna('N/A')
-    # Hybrid search: NL + Metrics
-    if "<" in query or ">" in query:
-        # Simple regex parser for logic
-        match = re.search(r'(\w+)\s*([<>]=?)\s*(\d+)', query.lower())
-        if match:
-            col, op, val = match.groups()
-            val = float(val) / 100 if col == 'accuracy' and float(val) > 1 else float(val)
-            if col in df.columns:
-                if '>' in op: df = df[df[col] >= val]
-                else: df = df[df[col] <= val]
+    q = query.lower()
+    # 1. Regex logic for metrics
+    match = re.search(r'(\w+)\s*([<>]=?)\s*(\d+)', q)
+    if match:
+        col, op, val = match.groups()
+        val = float(val)/100 if col == 'accuracy' and float(val) > 1 else float(val)
+        if col in df.columns:
+            if '>' in op: df = df[df[col] >= val]
+            else: df = df[df[col] <= val]
     
-    df['blob'] = df.astype(str).apply(' '.join, axis=1)
+    # 2. Semantic Search
+    df['blob'] = df.fillna('').astype(str).apply(' '.join, axis=1)
     vec = TfidfVectorizer(stop_words='english', ngram_range=(1,2))
     mtx = vec.fit_transform(df['blob'].tolist() + [query])
     df['relevance'] = cosine_similarity(mtx[-1], mtx[:-1])[0]
     return df[df['relevance'] > 0.01].sort_values('relevance', ascending=False)
 
-# --- UI NAVIGATION ---
+# --- NAVIGATION ---
 with st.sidebar:
-    st.title("Model Hub 2.0")
-    view = st.radio("Discovery", ["Marketplace", "Compare Tool", "Portfolio ROI", "Approvals"])
+    st.title("Enterprise Hub")
+    view = st.radio("Navigation", ["Marketplace Hub", "Strategy ROI", "Admin Ops", "Compare Basket"])
     st.divider()
-    user = st.selectbox("Identity", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
-    if st.session_state.compare_list:
-        st.info(f"Comparator: {len(st.session_state.compare_list)} models")
-        if st.button("Clear Comparison"): st.session_state.compare_list = []; st.rerun()
+    user = st.selectbox("Switch User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel (Leader)", "Admin"])
+    if st.session_state.compare_basket:
+        st.success(f"Comparing: {len(st.session_state.compare_basket)} models")
+        if st.button("Reset Basket"): st.session_state.compare_basket = []; st.rerun()
 
-# --- MARKETPLACE VIEW ---
-if view == "Marketplace":
-    t1, t2, t3 = st.tabs(["🏛 Explore Gallery", "🔥 Smart Discovery", "🚀 New Ingestion"])
+# --- 1. MARKETPLACE HUB ---
+if view == "Marketplace Hub":
+    t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🔥 Smart Discovery", "🚀 New Ingestion"])
     
     with t1:
-        q = st.text_input("💬 Search anything (e.g. 'Finance SageMaker' or 'accuracy > 95')", placeholder="Keywords, Teams, or Providers...")
-        results = get_recommendations(q, df_master)
+        q = st.text_input("💬 Smart Search (e.g. 'SageMaker Finance' or 'accuracy > 0.95')", placeholder="Keywords or operators...")
+        results = run_advanced_search(q, df_master)
         
         for i in range(0, min(len(results), 21), 3):
             cols = st.columns(3)
@@ -121,8 +114,8 @@ if view == "Marketplace":
                                     <span>{row['name'][:22]}</span>
                                     <span class="registry-badge">{row['registry_provider']}</span>
                                 </div>
-                                <div class="meta-row"><span class="tag-purple">{row['domain']}</span><span>{row['model_stage']}</span></div>
-                                <div class="meta-row"><span>Team: {row['model_owner_team']}</span><span>{row['model_version']}</span></div>
+                                <div class="meta-line"><b style="color:#6200EE;">{row['domain']}</b> | {row['model_stage']}</div>
+                                <div class="meta-line">Team: {row['model_owner_team']} | v{row['model_version']}</div>
                                 <div class="use-case-text">{row['use_cases']}</div>
                             </div>
                             <div>
@@ -131,89 +124,132 @@ if view == "Marketplace":
                                     <div class="metric-val"><span class="metric-label">Lat</span>{row['latency']}ms</div>
                                     <div class="metric-val"><span class="metric-label">Drift</span>{row['data_drift']}</div>
                                 </div>
-                                <div style="height:8px;"></div>
+                                <div style="height:10px;"></div>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        b1, b2, b3 = st.columns([1,1,1])
-                        if b1.button("Compare", key=f"c_{i+j}"):
-                            if row['name'] not in st.session_state.compare_list:
-                                st.session_state.compare_list.append(row['name'])
-                                st.toast("Added to comparison basket")
+                        # Fix Plotly Duplicate ID: Encapsulate interactive elements
+                        c_b1, c_b2, c_b3 = st.columns(3)
+                        if c_b1.button("Compare", key=f"btn_comp_{i+j}"):
+                            if row['name'] not in st.session_state.compare_basket:
+                                st.session_state.compare_basket.append(row['name'])
+                                st.toast("Added!")
                         
-                        with b2:
-                            with st.popover("Tech Specs"):
-                                st.subheader(f"Telemetry: {row['name']}")
-                                c_l, c_r = st.columns(2)
-                                c_l.metric("Inference ID", row['inference_endpoint_id'])
-                                c_r.metric("Run ID", row['run_id'])
-                                
+                        with c_b2:
+                            with st.popover("Specs"):
+                                st.write(f"**Lineage & Features: {row['name']}**")
                                 # Lineage Sankey
-                                st.write("**Lineage Path**")
-                                fig_lin = go.Figure(go.Sankey(node=dict(pad=15, thickness=20, label=[row['training_data_source'], "Training Run", row['name'], "Production Endpoint"], color="purple"),
-                                     link=dict(source=[0,1,2], target=[1,2,3], value=[1,1,1])))
-                                fig_lin.update_layout(height=150, margin=dict(l=0,r=0,t=0,b=0))
-                                st.plotly_chart(fig_lin, use_container_width=True)
+                                fig_s = go.Figure(go.Sankey(node=dict(label=["Source","Train","Model","Prod"], color="purple"), link=dict(source=[0,1,2], target=[1,2,3], value=[1,1,1])))
+                                fig_s.update_layout(height=140, margin=dict(l=0,r=0,t=0,b=0))
+                                st.plotly_chart(fig_s, use_container_width=True, key=f"sankey_{i+j}")
                                 
-                                # Feature Importance
-                                st.write("**Top Feature Contribution**")
-                                feat_df = pd.DataFrame({'Feature': ['Behavioral','Historical','Temporal','Geo'], 'Weight': [0.4, 0.3, 0.2, 0.1]})
-                                st.plotly_chart(px.bar(feat_df, x='Weight', y='Feature', orientation='h', height=150, color_discrete_sequence=['#6200EE']), use_container_width=True)
-                                
-                                st.button("Launch Jupyter Notebook", icon="🚀")
+                                st.write("**Feature Importance**")
+                                f_df = pd.DataFrame({'f':['A','B','C'], 'v':[.4,.3,.2]})
+                                st.plotly_chart(px.bar(f_df, x='v', y='f', orientation='h', height=120), use_container_width=True, key=f"feat_{i+j}")
+                                st.button("Launch Notebook", key=f"nb_{i+j}")
 
-                        if b3.button("Request", key=f"r_{i+j}"):
-                            st.toast("Approval request sent to Nat Patel")
+                        if c_b3.button("Access", key=f"btn_acc_{i+j}"):
+                            st.toast("Request sent to Nat Patel")
 
     with t2:
-        st.subheader("Smart Segments")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown("### 🔥 Trending This Week")
-            st.dataframe(df_master.nlargest(5, 'usage')[['name', 'usage', 'accuracy']], use_container_width=True)
-            
-            st.markdown("### ⚠️ High Drift Risk")
-            st.dataframe(df_master[df_master['data_drift'] > 0.08][['name', 'data_drift', 'monitoring_status']], use_container_width=True)
-            
-        with col_b:
-            st.markdown("### 💎 Hidden Gems (Low Adoption / High Perf)")
-            gems = df_master[(df_master['usage'] < 1000) & (df_master['accuracy'] > 0.95)]
+        st.subheader("Automated Insights")
+        c_a, c_b = st.columns(2)
+        with c_a:
+            st.markdown("#### 🔥 Trending (Most Adoption)")
+            st.dataframe(df_master.nlargest(5, 'usage')[['name', 'usage', 'domain']], use_container_width=True)
+            st.markdown("#### ⚠️ High Drift Risk")
+            st.dataframe(df_master[df_master['data_drift'] > 0.09][['name', 'data_drift', 'monitoring_status']], use_container_width=True)
+        with c_b:
+            st.markdown("#### 💎 Hidden Gems (High Acc / Low Use)")
+            gems = df_master[(df_master['accuracy'] > 0.96) & (df_master['usage'] < 1000)]
             st.dataframe(gems[['name', 'accuracy', 'usage']], use_container_width=True)
-            
-            st.markdown("### 🕒 Recently Improved")
+            st.markdown("#### 🕒 Recently Improved")
             st.dataframe(df_master.sort_values('last_retrained_date', ascending=False).head(5)[['name', 'last_retrained_date']], use_container_width=True)
 
-# --- COMPARE TOOL ---
-elif view == "Compare Tool":
-    st.header("Side-by-Side Comparison")
-    if not st.session_state.compare_list:
-        st.info("Select models from the Gallery to compare them here.")
-    else:
-        comp_df = df_master[df_master['name'].isin(st.session_state.compare_list)]
-        st.table(comp_df[['name', 'model_version', 'accuracy', 'latency', 'data_drift', 'cpu_util', 'sla_tier', 'registry_provider']])
-        
-        st.subheader("Visual Benchmark")
-        fig_comp = px.bar(comp_df, x='name', y=['accuracy', 'data_drift'], barmode='group', title="Accuracy vs. Drift Correlation")
-        st.plotly_chart(fig_comp, use_container_width=True)
+    with t3:
+        st.subheader("Model Ingestion Connector")
+        with st.form("ingest_v5", clear_on_submit=True):
+            f_n = st.text_input("Model Name*")
+            f_d = st.selectbox("Domain", df_master['domain'].unique())
+            f_p = st.selectbox("Registry Provider", ["MLflow", "Vertex AI", "SageMaker"])
+            f_desc = st.text_area("Description / Lineage Info*")
+            if st.form_submit_button("Publish to Fleet"):
+                if f_n and f_desc:
+                    new_row = pd.DataFrame([{
+                        "name": f_n, "domain": f_d, "accuracy": 0.85, "latency": 40, "registry_provider": f_p,
+                        "use_cases": f_desc, "contributor": user, "usage": 0, "data_drift": 0.0, "model_version": "1.0.0",
+                        "model_stage": "Experimental", "last_retrained_date": str(datetime.date.today()), "model_owner_team": "Internal",
+                        "monitoring_status": "Healthy", "sla_tier": "Bronze", "revenue_impact": 0
+                    }])
+                    df_master = pd.concat([df_master, new_row], ignore_index=True)
+                    df_master.to_csv(REG_PATH, index=False)
+                    st.success("Asset live in registry!")
 
-# --- ROI DASHBOARD ---
+# --- 2. COMPARE TOOL ---
+elif view == "Compare Basket":
+    st.header("Side-by-Side Asset Benchmark")
+    if not st.session_state.compare_basket:
+        st.info("Your basket is empty. Go to Marketplace and click 'Compare' on models.")
+    else:
+        c_df = df_master[df_master['name'].isin(st.session_state.compare_basket)]
+        st.dataframe(c_df[['name', 'accuracy', 'latency', 'data_drift', 'cpu_util', 'sla_tier', 'registry_provider']])
+        
+        st.subheader("Performance Matrix")
+        fig_c = px.bar(c_df, x='name', y=['accuracy', 'data_drift'], barmode='group', color_discrete_sequence=['#6200EE', '#FFD700'])
+        st.plotly_chart(fig_c, use_container_width=True)
+
+# --- 3. STRATEGY ROI ---
 elif view == "Portfolio ROI":
-    st.header("Executive Strategy Dashboard")
-    dom_agg = df_master.groupby('domain').agg({'revenue_impact': 'sum', 'risk_exposure': 'sum', 'accuracy': 'mean', 'usage': 'sum'}).reset_index()
+    st.header("Strategic Portfolio Performance")
+    agg = df_master.groupby('domain').agg({'revenue_impact': 'sum', 'accuracy': 'mean', 'usage': 'sum'}).reset_index()
     
     k1, k2, k3 = st.columns(3)
-    k1.metric("Total Revenue Impact", f"${dom_agg['revenue_impact'].sum()/1e6:.2f}M")
-    k2.metric("Total Risk Mitigated", f"${dom_agg['risk_exposure'].sum()/1e6:.2f}M")
-    k3.metric("Fleet Adoption", f"{int(dom_agg['usage'].sum()):,}")
+    k1.metric("Revenue Contribution", f"${agg['revenue_impact'].sum()/1e6:.1f}M")
+    k2.metric("Avg Fleet Quality", f"{int(agg['accuracy'].mean()*100)}%")
+    k3.metric("Total Adoption", f"{int(agg['usage'].sum()):,}")
     
     c1, c2 = st.columns(2)
-    with c1:
-        st.plotly_chart(px.pie(dom_agg, values='revenue_impact', names='domain', title="Revenue Attribution", hole=0.4), use_container_width=True)
-    with c2:
-        st.plotly_chart(px.scatter(df_master, x='accuracy', y='usage', size='revenue_impact', color='domain', hover_name='name', title="Performance vs Adoption Strategy"), use_container_width=True)
+    with c1: st.plotly_chart(px.pie(agg, values='revenue_impact', names='domain', hole=0.4, title="Revenue by Business Unit"), use_container_width=True)
+    with c2: st.plotly_chart(px.scatter(df_master, x='accuracy', y='usage', size='revenue_impact', color='domain', hover_name='name'), use_container_width=True)
 
-# --- LEADER / ADMIN VIEWS ---
+# --- 4. ADMIN OPS ---
+elif view == "Admin Ops":
+    st.header("Fleet Governance & Telemetry")
+    
+    sel_mod = st.selectbox("Highlight Solo Asset (Clean View)", ["None"] + list(df_master['name'].unique()))
+    
+    plot_df = df_master.copy()
+    # High Contrast Logic: Deep Red vs Pale Yellow
+    if sel_mod == "None":
+        color_vals = [0.5] * len(plot_df)
+        c_scale = [[0, 'rgba(98, 0, 238, 0.2)'], [1, 'rgba(98, 0, 238, 0.2)']]
+    else:
+        color_vals = [1.0 if n == sel_mod else 0.0 for n in plot_df['name']]
+        c_scale = [[0, 'rgba(255, 249, 196, 0.2)'], [1, '#B71C1C']]
+
+    fig_p = go.Figure(data=go.Parcoords(
+        labelfont=dict(size=12, color='black'), tickfont=dict(size=9, color='gray'),
+        line=dict(color=color_vals, colorscale=c_scale, showscale=False),
+        dimensions=list([
+            dict(range=[0.7, 1.0], label='Accuracy', values=plot_df['accuracy']),
+            dict(range=[0, 150], label='Latency', values=plot_df['latency']),
+            dict(range=[0, 20000], label='Usage', values=plot_df['usage']),
+            dict(range=[0, 0.3], label='Drift', values=plot_df['data_drift']),
+            dict(range=[0, 100], label='CPU %', values=plot_df['cpu_util'])
+        ])
+    ))
+    fig_p.update_layout(margin=dict(t=100, b=50, l=80, r=80), height=550)
+    st.plotly_chart(fig_p, use_container_width=True)
+    
+    st.subheader("Audit Log & Metadata")
+    st.dataframe(plot_df.drop(columns=['blob', 'relevance'], errors='ignore'), use_container_width=True)
+
+# --- 5. APPROVALS ---
 elif view == "Approvals":
-    st.subheader("Leader Approval Queue (Nat Patel)")
-    st.info("No pending requests for production migration.")
+    st.subheader("Leadership Approval Queue")
+    st.info("Current queue status for Nat Patel (Leader)")
+    st.write("Requests for Production promotion from Community Hub:")
+    # Simulation logic for Nat Patel
+    st.dataframe(df_master[df_master['type'] == 'Community'].head(5)[['name', 'contributor', 'domain']])
+    if st.button("Bulk Approve Selected"): st.success("Approved and moved to Official Registry.")
