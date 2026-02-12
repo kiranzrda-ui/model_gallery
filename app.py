@@ -8,25 +8,22 @@ import google.generativeai as genai
 import os, datetime, random, re, csv, json
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Model Hub 6.0", layout="wide")
+st.set_page_config(page_title="Enterprise AI Model Hub", layout="wide")
 
 st.markdown("""
     <style>
     :root { --accent: #6200EE; --lite-purple: #F3E5F5; --deep-purple: #7B1FA2; --pale-yellow: #FFF9C4; }
     .stApp { background-color: #F8FAFC; font-size: 0.82rem; }
-    
-    /* Compact Card UI */
     .model-card {
         background: white; border: 1px solid #e2e8f0; border-top: 3px solid var(--accent);
-        padding: 10px; border-radius: 6px; min-height: 310px; 
+        padding: 10px; border-radius: 6px; min-height: 330px; 
         display: flex; flex-direction: column; justify-content: space-between;
         box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     }
     .model-title { font-size: 0.85rem; font-weight: 700; color: #1e293b; margin-bottom: 2px; }
-    .metric-bar { display: flex; justify-content: space-between; background: #F1F5F9; padding: 4px; border-radius: 4px; margin-bottom: 5px; }
+    .metric-bar { display: flex; justify-content: space-between; background: #F1F5F9; padding: 4px; border-radius: 4px; margin-bottom: 8px; }
     .metric-val { font-size: 0.72rem; font-weight: 700; color: var(--accent); text-align: center; flex: 1; }
     .metric-label { font-size: 0.5rem; color: #94a3b8; display: block; text-transform: uppercase; }
-    
     .stButton>button { 
         background-color: var(--lite-purple); color: var(--deep-purple); 
         border: 1px solid var(--deep-purple); border-radius: 4px; 
@@ -36,44 +33,70 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- SCHEMA & DATA ---
+# --- SCHEMA & CONSTANTS ---
 MASTER_COLUMNS = [
     "name", "domain", "type", "accuracy", "latency", "clients", "use_cases", 
     "contributor", "usage", "data_drift", "revenue_impact", "risk_exposure", 
-    "approval_status", "model_stage", "model_version", "model_owner_team"
+    "approval_status", "model_stage", "model_version", "model_owner_team",
+    "cpu_util", "error_rate", "throughput", "training_data_source", "sla_tier"
 ]
 REG_PATH = "model_registry_v3.csv"
-SHAP_MAP = {
-    "Finance": ["Credit", "Income", "Debt", "History"],
-    "Risk": ["Exposure", "Vol", "Comp", "Liq"],
-    "Healthcare": ["Age", "BMI", "BP", "Glucose"],
-    "Default": ["F1", "F2", "F3", "F4"]
+REQ_PATH = "requests_v3.csv"
+
+SHAP_FEATURES = {
+    "Finance": ["Credit_Score", "Annual_Income", "Debt_Ratio", "Trans_Freq", "Collateral"],
+    "Healthcare": ["Age", "BMI", "Blood_Pressure", "Glucose", "Genetic_Risk"],
+    "Retail": ["Recency", "Frequency", "Monetary_Val", "Seasonality", "Customer_Age"],
+    "HR": ["Tenure", "Engagement", "Salary_Delta", "Education", "Travel_Freq"],
+    "Supply Chain": ["Lead_Time", "Route_Risk", "Fuel_Index", "Carrier_Rating", "Inventory"],
+    "IT Ops": ["CPU_Load", "P99_Latency", "Error_Count", "Throughput", "Uptime"],
+    "Risk": ["Exposure", "Volatility", "Compliance", "Liquidity", "Geopolitical"]
 }
 
-def load_data():
+# --- DATA ENGINE ---
+def load_sanitized_data():
     if not os.path.exists(REG_PATH): return pd.DataFrame(columns=MASTER_COLUMNS)
     df = pd.read_csv(REG_PATH)
+    # Self-healing columns
     for col in MASTER_COLUMNS:
-        if col not in df.columns: df[col] = 0.0 if col in ["accuracy","usage","revenue_impact"] else "N/A"
-    nums = ["accuracy", "latency", "usage", "data_drift", "revenue_impact", "risk_exposure"]
+        if col not in df.columns: df[col] = 0.0 if col in ["accuracy", "revenue_impact", "usage"] else "N/A"
+    
+    # Numeric sanitization
+    nums = ["accuracy", "latency", "usage", "data_drift", "revenue_impact", "risk_exposure", "cpu_util", "error_rate", "throughput"]
     for c in nums:
         df[c] = pd.to_numeric(df[c].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0.0)
+    
+    if 'approval_status' not in df.columns: df['approval_status'] = 'Approved'
     return df
 
-df_master = load_data()
+df_master = load_sanitized_data()
 
 # --- GEMINI INTEGRATION ---
 def call_gemini(prompt, api_key):
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
         return model.generate_content(prompt).text
-    except Exception as e: return f"AI Logic: {str(e)}"
+    except Exception as e: return f"AI Error: {str(e)}"
 
-# --- SEARCH & SIMILARITY ---
+# --- SEARCH ENGINE ---
 def hybrid_search(query, df):
-    if not query or df.empty: return df
+    if not query: return df
+    q = query.lower()
     df_res = df.copy().fillna('N/A')
+    
+    # Math Filters
+    pats = {'latency': r'latency\s*([<>]=?)\s*(\d+)', 'accuracy': r'accuracy\s*([<>]=?)\s*(\d+)', 'drift': r'drift\s*([<>]=?)\s*(0\.\d+|\d+)'}
+    for key, pat in pats.items():
+        match = re.search(pat, q)
+        if match:
+            op, val = match.groups()
+            val = float(val)/100 if (key=='accuracy' and float(val)>1) else float(val)
+            col = 'data_drift' if key=='drift' else key
+            if '>' in op: df_res = df_res[df_res[col] >= val]
+            else: df_res = df_res[df_res[col] <= val]
+
+    if df_res.empty: return df_res
     df_res['blob'] = df_res.astype(str).apply(' '.join, axis=1)
     vec = TfidfVectorizer(stop_words='english')
     mtx = vec.fit_transform(df_res['blob'].tolist() + [query])
@@ -86,12 +109,12 @@ def render_tile(row, key_prefix):
     <div class="model-card">
         <div>
             <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                <span style="font-size:0.55rem; color:#666;">v{row.get('model_version','1.0')}</span>
+                <span class="registry-badge">v{row.get('model_version','1.0')}</span>
                 <span style="color:#2E7D32; font-size:0.6rem;">● {row['model_stage']}</span>
             </div>
             <div class="model-title">{row['name']}</div>
-            <div style="font-size:0.65rem; color:gray;"><b>{row['domain']}</b> | {row['contributor']}</div>
-            <div style="font-size:0.68rem; color:#444; height:3em; overflow:hidden; margin:5px 0;">{row['use_cases']}</div>
+            <div class="meta-line"><b>{row['domain']}</b> | {row['contributor']}</div>
+            <div class="use-case-text">{row['use_cases']}</div>
         </div>
         <div class="metric-bar">
             <div class="metric-val"><span class="metric-label">Acc</span>{int(row['accuracy']*100)}%</div>
@@ -100,32 +123,47 @@ def render_tile(row, key_prefix):
         </div>
     </div>
     """, unsafe_allow_html=True)
+    
     c1, c2, c3 = st.columns(3)
-    if c1.button("Compare", key=f"c_{key_prefix}_{row['name']}"):
-        st.session_state.basket.append(row['name']); st.toast("Added to Basket")
+    with c1:
+        if st.button("Compare", key=f"c_{key_prefix}_{row['name']}"):
+            if row['name'] not in st.session_state.basket:
+                st.session_state.basket.append(row['name'])
+                st.toast("Added to basket")
     with c2:
         with st.popover("Specs"):
-            st.write(f"**Specs: {row['name']}**")
-            feats = SHAP_MAP.get(row['domain'], SHAP_MAP["Default"])
-            shap_df = pd.DataFrame({'Feature': feats, 'Impact': [random.uniform(-0.5, 0.5) for _ in range(4)]})
-            st.plotly_chart(px.bar(shap_df, x='Impact', y='Feature', orientation='h', height=150), use_container_width=True, key=f"sh_{key_prefix}_{row['name']}")
-    if c3.button("Access", key=f"r_{key_prefix}_{row['name']}"):
-        st.toast("Request Sent")
+            st.write(f"**SHAP Summary: {row['name']}**")
+            feats = SHAP_FEATURES.get(row['domain'], ["F1","F2","F3","F4","F5"])
+            shap_df = pd.DataFrame({'Feature': feats, 'Impact': [random.uniform(-0.5, 0.5) for _ in range(5)]}).sort_values('Impact')
+            shap_df['Color'] = ['#EF4444' if x < 0 else '#6200EE' for x in shap_df['Impact']]
+            fig = px.bar(shap_df, x='Impact', y='Feature', orientation='h', color='Color', color_discrete_map="identity", height=180)
+            fig.update_layout(margin=dict(l=0,r=0,t=0,b=0), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True, key=f"sh_{key_prefix}_{row['name']}")
+    with c3:
+        if st.button("Request", key=f"r_{key_prefix}_{row['name']}"):
+            df_master.loc[df_master['name'] == row['name'], 'approval_status'] = 'Pending'
+            df_master.to_csv(REG_PATH, index=False)
+            st.toast("Sent to Nat Patel")
 
 # --- NAVIGATION ---
 with st.sidebar:
-    st.title("Enterprise AI")
+    st.title("Model Hub 6.0")
     api_key = st.text_input("Gemini API Key", type="password")
     nav = st.radio("Navigation", ["WorkBench Companion", "Model Gallery", "AI Business Value", "Approval"])
     st.divider()
-    role = st.selectbox("Role", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
+    role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
+    st.session_state.role = role
     if 'basket' not in st.session_state: st.session_state.basket = []
+    if st.session_state.basket:
+        st.success(f"Compare Basket: {len(st.session_state.basket)}")
+        if st.button("Clear Basket"): st.session_state.basket = []; st.rerun()
 
-# --- 1. WORKBENCH COMPANION (CONVERSATIONAL INSIGHTS) ---
+# --- 1. WORKBENCH COMPANION ---
 if nav == "WorkBench Companion":
     st.header("🤖 WorkBench Companion")
     if "messages" not in st.session_state: st.session_state.messages = []
-    
+    if "last_context" not in st.session_state: st.session_state.last_context = None
+
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -133,76 +171,126 @@ if nav == "WorkBench Companion":
                 cols = st.columns(min(len(msg["df"]), 3))
                 for i, r in enumerate(msg["df"].head(3).to_dict('records')):
                     with cols[i]: render_tile(r, f"chat_h_{i}")
+            if "chart" in msg: st.plotly_chart(msg["chart"], use_container_width=True)
 
-    if prompt := st.chat_input("Ask about trends, gems, or specific model specs..."):
+    if prompt := st.chat_input("E.g., 'Compare Ris-Model-001 and Fin-Model-002'"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
 
         with st.chat_message("assistant"):
             q = prompt.lower()
-            res_df = pd.DataFrame()
-            # CONVERSATIONAL INTENTS
-            if "trending" in q or "popular" in q:
-                res_txt = "Here are the most adopted models this week:"
+            res_txt, res_df, res_chart = "", pd.DataFrame(), None
+
+            # INTENT: SUBMISSION
+            if any(x in q for x in ["submit", "register"]):
+                raw_json = call_gemini(f"Extract JSON (name, domain, accuracy(0-1), latency(int), use_cases) from: {prompt}", api_key)
+                try:
+                    data = json.loads(re.search(r"\{.*\}", raw_json, re.DOTALL).group())
+                    new_row = {c: "N/A" for c in MASTER_COLUMNS}
+                    new_row.update({"name": data.get('name','Asset'), "domain": data.get('domain','Finance'), "accuracy": data.get('accuracy',0.9), "latency": data.get('latency',30), "contributor": role, "approval_status": "Pending", "model_stage": "Prod", "revenue_impact": 5000})
+                    pd.concat([df_master, pd.DataFrame([new_row])]).to_csv(REG_PATH, index=False)
+                    res_txt = f"✅ Model **{data.get('name')}** registered and sent for approval."
+                except: res_txt = "Could not parse model details. Please provide Name, Domain, Accuracy, and Latency."
+
+            # INTENT: TRENDS / GEMS
+            elif "trending" in q or "popular" in q:
+                res_txt = "Top adopted models this week:"
                 res_df = df_master.nlargest(3, 'usage')
             elif "gems" in q or "hidden" in q:
-                res_txt = "Found these low-adoption, high-performance models:"
+                res_txt = "Hidden Gems (High performance, low adoption):"
                 res_df = df_master[(df_master['accuracy'] > 0.96) & (df_master['usage'] < 1000)].head(3)
-            elif "drift" in q or "risk" in q:
-                res_txt = "The following models have high data drift and need attention:"
-                res_df = df_master.nlargest(3, 'data_drift')
-            elif "spec" in q or "detail" in q or "tell me about" in q:
-                res_txt = "Fetching specific model telemetry..."
-                res_df = hybrid_search(q, df_master).head(1)
+
+            # INTENT: ROI / REVENUE
+            elif "revenue" in q or "impact" in q:
+                dom = next((d for d in df_master['domain'].unique() if d.lower() in q), st.session_state.last_context)
+                if dom:
+                    st.session_state.last_context = dom
+                    val = df_master[df_master['domain'] == dom]['revenue_impact'].sum()
+                    res_txt = f"The **{dom}** domain has generated **${val/1e6:.2f}M** in impact."
+                    if "top" in q or "contributor" in q:
+                        res_df = df_master[df_master['domain'] == dom].nlargest(3, 'revenue_impact')
+                else: res_txt = "Which domain should I analyze?"
+
+            # INTENT: COMPARE
+            elif "compare" in q:
+                names = [n for n in df_master['name'] if n.lower() in q]
+                if len(names) >= 2:
+                    res_df = df_master[df_master['name'].isin(names)]
+                    res_chart = px.bar(res_df, x='name', y=['accuracy','latency','data_drift','usage'], barmode='group')
+                    res_txt = "Generated comparison chart."
+                else: res_txt = "Please provide two exact model names."
+
+            # INTENT: MY CONTRIBUTIONS
+            elif "my models" in q or "my contributions" in q:
+                res_df = df_master[df_master['contributor'] == role]
+                res_txt = f"Found {len(res_df)} models contributed by you."
+
+            # DEFAULT: SEARCH / SPECS
             else:
-                res_txt = call_gemini(prompt, api_key) if api_key else "I found these relevant models:"
+                res_txt = call_gemini(prompt, api_key) if api_key else "Providing results:"
                 res_df = hybrid_search(prompt, df_master)
-            
+
             st.markdown(res_txt)
+            if res_chart: st.plotly_chart(res_chart)
             if not res_df.empty and len(res_df) < len(df_master):
                 cols = st.columns(min(len(res_df), 3))
                 for i, r in enumerate(res_df.head(3).to_dict('records')):
-                    with cols[i]: render_tile(r, f"chat_new_{i}")
-                st.session_state.messages.append({"role": "assistant", "content": res_txt, "df": res_df.head(3)})
-            else:
-                st.session_state.messages.append({"role": "assistant", "content": res_txt})
+                    with cols[i]: render_tile(r, f"chat_{i}")
+            
+            st.session_state.messages.append({"role": "assistant", "content": res_txt, "df": res_df.head(3), "chart": res_chart})
 
-# --- 2. MODEL GALLERY (SPECS & COMPARE) ---
+# --- 2. MODEL GALLERY ---
 elif nav == "Model Gallery":
-    t1, t2 = st.tabs(["🏛 Unified Gallery", "⚖️ Comparison Basket"])
+    t1, t2 = st.tabs(["🏛 Unified Gallery", "⚖️ Benchmark Basket"])
     with t1:
-        q_gal = st.text_input("Search Models")
-        res_gal = hybrid_search(q_gal, df_master)
-        for i in range(0, min(len(res_gal), 15), 3):
+        q_gal = st.text_input("💬 Search Keywords or Logic (e.g. '>95 accuracy')")
+        results = hybrid_search(q_gal, df_master)
+        for i in range(0, min(len(results), 21), 3):
             cols = st.columns(3)
             for j in range(3):
-                if i+j < len(res_gal):
-                    with cols[j]: render_tile(res_gal.iloc[i+j], f"gal_{i+j}")
+                if i+j < len(results):
+                    with cols[j]: render_tile(results.iloc[i+j], f"gal_{i+j}")
     with t2:
-        if not st.session_state.basket: st.info("Basket is empty. Add models from the Gallery.")
+        if not st.session_state.basket: st.info("Basket empty.")
         else:
             comp_df = df_master[df_master['name'].isin(st.session_state.basket)]
             st.dataframe(comp_df[['name','accuracy','latency','data_drift','usage']])
             st.plotly_chart(px.bar(comp_df, x='name', y=['accuracy','latency','data_drift'], barmode='group'))
 
-# --- 3. AI BUSINESS VALUE (ROI) ---
+# --- 3. AI BUSINESS VALUE ---
 elif nav == "AI Business Value":
-    st.header("Strategic ROI Dashboard")
+    st.header("Executive Strategic Dashboard")
     agg = df_master.groupby('domain').agg({'revenue_impact':'sum','usage':'sum','accuracy':'mean'}).reset_index()
     k1, k2 = st.columns(2)
     k1.metric("Total Rev Impact", f"${agg['revenue_impact'].sum()/1e6:.1f}M")
-    k2.metric("Fleet Adoption", f"{int(agg['usage'].sum()):,}")
-    st.plotly_chart(px.bar(agg, x='domain', y='revenue_impact', color='accuracy', title="ROI by Domain"))
+    k2.metric("Portfolio Quality", f"{int(agg['accuracy'].mean()*100)}%")
+    c1, c2 = st.columns(2)
+    with c1: st.plotly_chart(px.pie(agg, values='revenue_impact', names='domain', hole=0.4))
+    with c2: st.plotly_chart(px.bar(agg, x='domain', y='revenue_impact', color='accuracy'))
 
-# --- 4. APPROVAL (NAT PATEL) ---
+# --- 4. APPROVAL / ADMIN ---
 elif nav == "Approval":
     if role == "Nat Patel" or role == "Admin":
         st.subheader("Leader Approval Queue")
         pend = df_master[df_master['approval_status'] == 'Pending']
         if not pend.empty:
-            st.table(pend[['name','domain','contributor']])
-            if st.button("Bulk Approve"):
+            st.table(pend[['name','domain','contributor','accuracy']])
+            if st.button("Approve All"):
                 df_master.loc[df_master['approval_status']=='Pending','approval_status']='Approved'
                 df_master.to_csv(REG_PATH, index=False); st.rerun()
         else: st.success("Queue clear.")
-    else: st.warning("Access Restricted to Nat Patel.")
+        
+        st.divider()
+        st.subheader("Fleet Governance (Solo Inspector)")
+        sel = st.selectbox("Highlight Line", ["None"] + list(df_master['name'].unique()))
+        cv = [1.0 if n == sel else 0.0 for n in df_master['name']]
+        fig_p = go.Figure(data=go.Parcoords(
+            labelfont=dict(size=10, color='black'), tickfont=dict(size=8),
+            line=dict(color=cv, colorscale=[[0, '#FFF9C4'], [1, '#B71C1C']], showscale=False),
+            dimensions=[dict(range=[0.7,1], label='Accuracy', values=df_master['accuracy']),
+                        dict(range=[0,150], label='Latency', values=df_master['latency']),
+                        dict(range=[0,25000], label='Usage', values=df_master['usage']),
+                        dict(range=[0,0.3], label='Drift', values=df_master['data_drift'])]))
+        fig_p.update_layout(margin=dict(t=80, b=40, l=80, r=80), height=550)
+        st.plotly_chart(fig_p, use_container_width=True)
+    else: st.warning("Access Restricted.")
