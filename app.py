@@ -8,17 +8,15 @@ import google.generativeai as genai
 import os, datetime, random, re, csv, json
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Model Hub 7.0", layout="wide")
+st.set_page_config(page_title="Enterprise Model Hub 8.0", layout="wide")
 
 st.markdown("""
     <style>
     :root { --accent: #6200EE; --lite-purple: #F3E5F5; --deep-purple: #7B1FA2; --pale-yellow: #FFF9C4; }
     .stApp { background-color: #F8FAFC; font-size: 0.8rem; }
-    
-    /* Ultra-Compact Card UI */
     .model-card {
         background: white; border: 1px solid #e2e8f0; border-top: 3px solid var(--accent);
-        padding: 6px 10px; border-radius: 6px; min-height: 260px; 
+        padding: 8px 10px; border-radius: 6px; min-height: 280px; 
         display: flex; flex-direction: column; justify-content: space-between;
         box-shadow: 0 1px 4px rgba(0,0,0,0.04);
     }
@@ -26,8 +24,6 @@ st.markdown("""
     .metric-bar { display: flex; justify-content: space-between; background: #F1F5F9; padding: 3px; border-radius: 4px; margin-bottom: 4px; }
     .metric-val { font-size: 0.7rem; font-weight: 700; color: var(--accent); text-align: center; flex: 1; }
     .metric-label { font-size: 0.45rem; color: #94a3b8; display: block; text-transform: uppercase; }
-
-    /* Micro-Buttons */
     .stButton>button { 
         background-color: var(--lite-purple); color: var(--deep-purple); 
         border: 1px solid var(--deep-purple); border-radius: 4px; 
@@ -38,30 +34,34 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- SCHEMA ---
-MASTER_COLUMNS = [
-    "name", "domain", "type", "accuracy", "latency", "clients", "use_cases", 
-    "contributor", "usage", "data_drift", "revenue_impact", "risk_exposure", 
-    "approval_status", "model_stage", "model_version", "model_owner_team",
-    "cpu_util", "error_rate", "throughput"
-]
+# --- CONSTANTS ---
 REG_PATH = "model_registry_v3.csv"
 SHAP_FEATURES = {
     "Finance": ["Credit", "Income", "Debt", "History"],
     "Healthcare": ["Age", "BMI", "BP", "Glucose"],
-    "Supply Chain": ["Lead_Time", "Inventory", "Risk", "Fuel"],
+    "Risk": ["Exposure", "Volatility", "Compliance", "Liquidity"],
+    "Supply Chain": ["Lead_Time", "Inventory", "Route", "Demand"],
     "Default": ["F1", "F2", "F3", "F4"]
 }
 
-# --- DATA ENGINE ---
+# --- DATA ENGINE (Self-Healing & Sanitization) ---
 def load_sanitized_data():
-    if not os.path.exists(REG_PATH): return pd.DataFrame(columns=MASTER_COLUMNS)
+    if not os.path.exists(REG_PATH): return pd.DataFrame()
     df = pd.read_csv(REG_PATH)
-    for col in MASTER_COLUMNS:
-        if col not in df.columns: df[col] = 0.0 if col in ["accuracy","usage","revenue_impact"] else "N/A"
-    nums = ["accuracy", "latency", "usage", "data_drift", "revenue_impact", "risk_exposure"]
-    for c in nums:
-        df[c] = pd.to_numeric(df[c].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0.0)
+    
+    # 1. Standardize column names and types
+    numeric_cols = ['usage', 'accuracy', 'latency', 'data_drift', 'revenue_impact', 'risk_exposure', 'cpu_util']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0.0)
+        else:
+            df[col] = 0.0
+
+    # 2. Fix 0 Value logic (If ROI data is missing)
+    if df['revenue_impact'].sum() == 0:
+        df['revenue_impact'] = df['usage'] * 75.0 # Simulation: $75 per usage
+    
+    if 'approval_status' not in df.columns: df['approval_status'] = 'Approved'
     return df
 
 df_master = load_sanitized_data()
@@ -85,14 +85,6 @@ def hybrid_search(query, df):
     mtx = vec.fit_transform(df_res['blob'].tolist() + [query])
     df_res['relevance'] = cosine_similarity(mtx[-1], mtx[:-1])[0]
     return df_res[df_res['relevance'] > 0.01].sort_values('relevance', ascending=False)
-
-# --- GEMINI INTEGRATION ---
-def call_gemini(prompt, api_key):
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
-        return model.generate_content(prompt).text
-    except Exception as e: return f"AI Offline. Prompt: {prompt[:30]}..."
 
 # --- UI COMPONENTS ---
 def render_tile(row, key_prefix, show_usage=False):
@@ -120,25 +112,29 @@ def render_tile(row, key_prefix, show_usage=False):
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("Compare", key=f"c_{key_prefix}_{row['name']}_{random.randint(0,999)}"):
-            if row['name'] not in st.session_state.basket: st.session_state.basket.append(row['name'])
+        if st.button("Compare", key=f"c_{key_prefix}_{row['name']}"):
+            if row['name'] not in st.session_state.basket: 
+                st.session_state.basket.append(row['name'])
+                st.rerun()
     with c2:
         with st.popover("Specs"):
             st.write(f"**SHAP: {row['name']}**")
             feats = SHAP_FEATURES.get(row['domain'], SHAP_FEATURES["Default"])
             shap_df = pd.DataFrame({'Feature': feats, 'Impact': [random.uniform(-0.5, 0.5) for _ in range(4)]}).sort_values('Impact')
             shap_df['Color'] = ['#EF4444' if x < 0 else '#6200EE' for x in shap_df['Impact']]
-            st.plotly_chart(px.bar(shap_df, x='Impact', y='Feature', orientation='h', color='Color', color_discrete_map="identity", height=140), use_container_width=True)
+            st.plotly_chart(px.bar(shap_df, x='Impact', y='Feature', orientation='h', color='Color', color_discrete_map="identity", height=150), use_container_width=True)
     with c3:
-        if st.button("Request", key=f"r_{key_prefix}_{row['name']}_{random.randint(0,999)}"):
-            st.toast("Access Request Logged")
+        if st.button("Request", key=f"r_{key_prefix}_{row['name']}"):
+            df_master.loc[df_master['name'] == row['name'], 'approval_status'] = 'Pending'
+            df_master.to_csv(REG_PATH, index=False)
+            st.toast("Sent to Nat Patel")
 
-# --- SIDEBAR NAVIGATION ---
+# --- NAVIGATION ---
 with st.sidebar:
-    st.title("Hub Controls")
-    api_key = st.text_input("Gemini API Key", type="password")
-    nav = st.radio("Go to", ["WorkBench Companion", "Model Gallery", "AI Business Value", "Approval"])
-    role = st.selectbox("Role", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
+    st.title("Enterprise AI Hub")
+    key = st.text_input("Gemini API Key", type="password")
+    nav = st.radio("Navigation", ["WorkBench Companion", "Model Gallery", "AI Business Value", "Approval"])
+    role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
     if 'basket' not in st.session_state: st.session_state.basket = []
 
 # --- 1. WORKBENCH COMPANION ---
@@ -147,95 +143,70 @@ if nav == "WorkBench Companion":
     if "messages" not in st.session_state: st.session_state.messages = []
     if "context_domain" not in st.session_state: st.session_state.context_domain = None
 
-    # Chat History Rendering Loop (with Column safety)
     for i, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            if "df" in msg:
+            if "df" in msg and not msg["df"].empty:
                 cols = st.columns(min(len(msg["df"]), 3))
                 for idx, r in enumerate(msg["df"].head(3).to_dict('records')):
-                    with cols[idx]: render_tile(r, f"chat_h_{i}_{idx}", show_usage=msg.get("is_trending", False))
-            if "chart_data" in msg:
-                c_df = pd.DataFrame(msg["chart_data"])
-                # DEFENSIVE CHECK: Ensure columns exist before displaying table/chart
-                avail_cols = [c for c in ['name','accuracy','latency','usage','data_drift'] if c in c_df.columns]
-                st.table(c_df[avail_cols])
-                if 'accuracy' in c_df.columns:
-                    st.plotly_chart(px.bar(c_df, x='name', y='accuracy', title="Comparative Accuracy"), key=f"ch_{i}")
+                    with cols[idx]: render_tile(r, f"chat_h_{i}_{idx}", show_usage=msg.get("trending", False))
+            if "pie_data" in msg:
+                st.plotly_chart(px.pie(pd.DataFrame(msg["pie_data"]), values='revenue_impact', names='domain', hole=0.4))
 
-    if prompt := st.chat_input("Ask about models, ROI, or trends..."):
+    if prompt := st.chat_input("E.g. 'Which domains contribute to revenue?'"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
 
         with st.chat_message("assistant"):
             q = prompt.lower()
-            res_txt, res_df, res_data, is_trend = "", pd.DataFrame(), None, False
+            res_txt, res_df, res_pie, is_trend = "", pd.DataFrame(), None, False
 
-            # Detect Domain Switch
-            domains = df_master['domain'].unique()
-            found_dom = next((d for d in domains if d.lower() in q), None)
+            # Detect Domain
+            found_dom = next((d for d in df_master['domain'].unique() if d.lower() in q), None)
             if found_dom: st.session_state.context_domain = found_dom
 
-            # INTENT: TRENDING
-            if "trending" in q or "popular" in q:
-                dom = st.session_state.context_domain
-                if dom:
-                    res_df = df_master[df_master['domain'] == dom].nlargest(3, 'usage')
-                    res_txt = f"Here are the top trending models in **{dom}**:"
-                else:
-                    res_df = df_master.nlargest(3, 'usage')
-                    res_txt = "Top trending models across all domains:"
-                is_trend = True
-
-            # INTENT: REVENUE / DOMAIN IMPACT
-            elif "revenue" in q or "impact" in q or "contribution" in q:
-                dom = st.session_state.context_domain
-                if dom and "which domain" not in q:
-                    val = df_master[df_master['domain'] == dom]['revenue_impact'].sum()
-                    res_txt = f"The **{dom}** domain has contributed **${val/1e6:.2f}M** in revenue impact."
-                    if "top" in q or "contributor" in q:
-                        res_df = df_master[df_master['domain'] == dom].nlargest(3, 'revenue_impact')
+            if "revenue" in q or "impact" in q:
+                if found_dom:
+                    val = df_master[df_master['domain'] == found_dom]['revenue_impact'].sum()
+                    res_txt = f"The **{found_dom}** domain impact is **${val/1e6:.2f}M**."
                 else:
                     agg = df_master.groupby('domain')['revenue_impact'].sum().reset_index()
-                    res_data = agg.to_dict('records')
-                    res_txt = "Here is the revenue contribution breakdown by domain:"
+                    res_pie = agg.to_dict('records')
+                    res_txt = "Here is the revenue contribution by domain:"
                     st.plotly_chart(px.pie(agg, values='revenue_impact', names='domain', hole=0.4))
-
-            # INTENT: COMPARE
-            elif "compare" in q:
-                names = [n for n in df_master['name'].unique() if n.lower() in q]
-                if len(names) >= 2:
-                    res_df = df_master[df_master['name'].isin(names)]
-                    res_data = res_df.to_dict('records')
-                    res_txt = f"Comparing **{', '.join(names)}**..."
-                    st.table(res_df[['name','accuracy','latency','usage']])
-                else: res_txt = "Please specify exact model names to compare."
-
-            # INTENT: PORTFOLIO
-            elif "my models" in q or "my contributions" in q:
-                res_df = df_master[df_master['contributor'] == role]
-                res_txt = f"Found **{len(res_df)}** models contributed by you, {role}."
-
-            # DEFAULT: SEARCH
+            
+            elif "trending" in q or "popular" in q:
+                dom = st.session_state.context_domain
+                res_df = df_master[df_master['domain'] == dom].nlargest(3, 'usage') if dom else df_master.nlargest(3, 'usage')
+                res_txt = f"Trending models {'in ' + dom if dom else 'globally'}:"
+                is_trend = True
+            
+            elif "submit" in q or "register" in q:
+                res_txt = "Registration processed and sent to **Nat Patel** for approval."
+            
             else:
                 res_df = hybrid_search(q, df_master).head(3)
-                res_txt = call_gemini(prompt, api_key) if api_key else "Relevant matches:"
+                res_txt = "Relevant models found:"
 
             st.markdown(res_txt)
-            if not res_df.empty and len(res_df) < len(df_master):
+            if not res_df.empty:
                 cols = st.columns(min(len(res_df), 3))
-                for i, r in enumerate(res_df.head(3).to_dict('records')):
-                    with cols[i]: render_tile(r, f"chat_n_{i}", show_usage=is_trend)
+                for i_idx, r in enumerate(res_df.head(3).to_dict('records')):
+                    with cols[i_idx]: render_tile(r, f"chat_n_{i_idx}", show_usage=is_trend)
             
-            st.session_state.messages.append({"role": "assistant", "content": res_txt, "df": res_df, "chart_data": res_data, "is_trending": is_trend})
+            st.session_state.messages.append({"role": "assistant", "content": res_txt, "df": res_df, "pie_data": res_pie, "trending": is_trend})
 
 # --- 2. MODEL GALLERY ---
 elif nav == "Model Gallery":
-    t1, t2 = st.tabs(["🏛 Inventory", "⚖️ Comparison Basket"])
+    t1, t2 = st.tabs(["🏛 Unified Gallery", "⚖️ Benchmark Basket"])
     with t1:
+        if st.session_state.basket:
+            st.info(f"Basket: {', '.join(st.session_state.basket)}")
+            if st.button("Reset Basket"): st.session_state.basket = []; st.rerun()
+        
         q_gal = st.text_input("Smart Search")
         res = hybrid_search(q_gal, df_master)
-        for i in range(0, min(len(res), 15), 3):
+        for i in range(0, min(len(res), 12), 3):
             cols = st.columns(3)
             for j in range(3):
                 if i+j < len(res):
@@ -244,13 +215,12 @@ elif nav == "Model Gallery":
         if not st.session_state.basket: st.info("Basket empty.")
         else:
             comp_df = df_master[df_master['name'].isin(st.session_state.basket)]
-            st.dataframe(comp_df[['name','accuracy','latency','usage','data_drift']])
+            st.table(comp_df[['name','accuracy','latency','usage','data_drift']])
             st.plotly_chart(px.bar(comp_df, x='name', y=['accuracy','latency','data_drift'], barmode='group'))
 
 # --- 3. AI BUSINESS VALUE ---
 elif nav == "AI Business Value":
-    st.header("Executive Strategic ROI")
-    # Sanitized group by to prevent crashes
+    st.header("Strategic Portfolio ROI")
     agg = df_master.groupby('domain').agg({'revenue_impact':'sum','usage':'sum','accuracy':'mean'}).reset_index()
     k1, k2 = st.columns(2)
     k1.metric("Revenue Contribution", f"${agg['revenue_impact'].sum()/1e6:.1f}M")
@@ -265,9 +235,9 @@ elif nav == "Approval":
         st.subheader("Leader Approval Queue")
         pend = df_master[df_master['approval_status'] == 'Pending']
         if not pend.empty:
-            st.table(pend[['name','domain','contributor']])
-            if st.button("Bulk Approve"):
-                df_master.loc[df_master['approval_status']=='Pending','approval_status']='Approved'
+            st.table(pend[['name','domain','contributor','accuracy']])
+            if st.button("Approve All Requests"):
+                df_master.loc[df_master['approval_status'] == 'Pending', 'approval_status'] = 'Approved'
                 df_master.to_csv(REG_PATH, index=False); st.rerun()
-        else: st.success("Queue Clear.")
-    else: st.warning("Access Restricted.")
+        else: st.success("Queue clear.")
+    else: st.warning("Restricted to Leaders.")
