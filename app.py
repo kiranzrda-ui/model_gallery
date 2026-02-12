@@ -128,14 +128,14 @@ def render_tile(row, key_prefix):
 with st.sidebar:
     st.title("Model Hub 5.0")
     api_key = st.text_input("Gemini API Key", type="password")
-    nav = st.radio("Navigation", ["AI Copilot", "Model Gallery", "AI Business Value", "Admin"])
+    nav = st.radio("Navigation", ["WorkBench Companion", "Model Gallery", "AI Business Value", "Admin"])
     st.divider()
     role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
     st.session_state.role = role
 
 # --- 1. AI COPILOT ---
-if nav == "AI Copilot":
-    st.header("🤖 Model Assistant")
+if nav == "WorkBench Companion":
+    st.header("🤖 WorkBench Companion")
     if "messages" not in st.session_state: st.session_state.messages = []
     if "context" not in st.session_state: st.session_state.context = None
 
@@ -233,13 +233,13 @@ elif nav == "Model Gallery":
             if i+j < len(res):
                 with cols[j]: render_tile(res.iloc[i+j], f"gal_{i+j}")
 
-elif nav == "Strategy ROI":
+elif nav == "AI Business Value":
     agg = df_master.groupby('domain').agg({'revenue_impact':'sum','usage':'sum','accuracy':'mean'}).reset_index()
     c1, c2 = st.columns(2)
     c1.plotly_chart(px.pie(agg, values='revenue_impact', names='domain', hole=0.4, title="Revenue Share"))
     c2.plotly_chart(px.bar(agg, x='domain', y='revenue_impact', color='accuracy', title="ROI vs Performance"))
 
-elif nav == "Admin Ops":
+elif nav == "Admin":
     if role == "Nat Patel":
         st.subheader("Leader Approvals")
         pend = df_master[df_master['approval_status'] == 'Pending']
