@@ -135,7 +135,7 @@ with st.sidebar:
 
 # --- 1. AI COPILOT ---
 if nav == "AI Copilot":
-    st.header("🤖 AI Workbench Companion")
+    st.header("🤖 Model Companion")
     if "messages" not in st.session_state: st.session_state.messages = []
     if "context" not in st.session_state: st.session_state.context = None
 
