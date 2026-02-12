@@ -128,7 +128,7 @@ def render_tile(row, key_prefix):
 with st.sidebar:
     st.title("Model Hub 5.0")
     api_key = st.text_input("Gemini API Key", type="password")
-    nav = st.radio("Navigation", ["WorkBench Companion", "Model Gallery", "AI Business Value", "Admin"])
+    nav = st.radio("Navigation", ["WorkBench Companion", "Model Gallery", "Strategy ROI", "Admin"])
     st.divider()
     role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
     st.session_state.role = role
@@ -233,7 +233,7 @@ elif nav == "Model Gallery":
             if i+j < len(res):
                 with cols[j]: render_tile(res.iloc[i+j], f"gal_{i+j}")
 
-elif nav == "AI Business Value":
+elif nav == "Strategy ROI":
     agg = df_master.groupby('domain').agg({'revenue_impact':'sum','usage':'sum','accuracy':'mean'}).reset_index()
     c1, c2 = st.columns(2)
     c1.plotly_chart(px.pie(agg, values='revenue_impact', names='domain', hole=0.4, title="Revenue Share"))
