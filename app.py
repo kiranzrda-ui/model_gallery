@@ -128,7 +128,7 @@ def render_tile(row, key_prefix):
 with st.sidebar:
     st.title("Model Hub 5.0")
     api_key = st.text_input("Gemini API Key", type="password")
-    nav = st.radio("Navigation", ["Companion Mode", "Model Gallery", "AI Business Value", "Approval"])
+    nav = st.radio("Navigation", ["AI Copilot", "Model Gallery", "AI Business Value", "Admin"])
     st.divider()
     role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
     st.session_state.role = role
