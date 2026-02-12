@@ -8,7 +8,7 @@ import google.generativeai as genai
 import os, datetime, random, re, csv, json
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Enterprise AI Services Workbench 1.0", layout="wide")
+st.set_page_config(page_title="Enterprise Model Hub 5.0", layout="wide")
 
 st.markdown("""
     <style>
@@ -126,16 +126,16 @@ def render_tile(row, key_prefix):
 
 # --- NAVIGATION ---
 with st.sidebar:
-    st.title("AI Services Workbench")
+    st.title("Model Hub 5.0")
     api_key = st.text_input("Gemini API Key", type="password")
-    nav = st.radio("Navigation", ["Companion Mode", "Model Gallery", "AI Business Value", "Admin"])
+    nav = st.radio("Navigation", ["Companion Mode", "Model Gallery", "AI Business Value", "Approval"])
     st.divider()
     role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
     st.session_state.role = role
 
 # --- 1. AI COPILOT ---
 if nav == "AI Copilot":
-    st.header("🤖 Model Companion")
+    st.header("🤖 Model Assistant")
     if "messages" not in st.session_state: st.session_state.messages = []
     if "context" not in st.session_state: st.session_state.context = None
 
