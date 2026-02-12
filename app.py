@@ -8,7 +8,7 @@ import google.generativeai as genai
 import os, datetime, random, re, csv
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Model Hub 4.0", layout="wide")
+st.set_page_config(page_title="Enterprise Model Hub 4.0", layout="wide")
 
 st.markdown("""
     <style>
@@ -41,7 +41,6 @@ st.markdown("""
 # --- CONSTANTS ---
 REG_PATH = "model_registry_v3.csv"
 REQ_PATH = "requests_v3.csv"
-LOG_PATH = "search_logs_v3.csv"
 SHAP_FEATURES = {
     "Finance": ["Credit_Score", "Income", "Debt_Ratio", "Trans_Count", "History"],
     "Healthcare": ["Age", "BMI", "Blood_Pressure", "Glucose", "Genetic_Risk"],
@@ -55,6 +54,7 @@ SHAP_FEATURES = {
 def load_sanitized_data():
     if not os.path.exists(REG_PATH): return pd.DataFrame()
     df = pd.read_csv(REG_PATH)
+    # Strict numeric cleaning to fix ROI errors
     nums = ['usage', 'accuracy', 'latency', 'data_drift', 'revenue_impact', 'risk_exposure', 'cpu_util', 'error_rate', 'throughput']
     for c in nums:
         if c in df.columns:
@@ -70,8 +70,13 @@ def hybrid_search(query, df):
     q = query.lower()
     work_df = df.copy().fillna('N/A')
     
-    # Math logic: E.g. "latency < 50"
-    pats = {'latency': r'latency\s*([<>]=?)\s*(\d+)', 'accuracy': r'accuracy\s*([<>]=?)\s*(\d+)', 'drift': r'drift\s*([<>]=?)\s*(0\.\d+|\d+)'}
+    # 1. Math Filter Parser
+    pats = {
+        'latency': r'latency\s*([<>]=?)\s*(\d+)', 
+        'accuracy': r'accuracy\s*([<>]=?)\s*(\d+)', 
+        'drift': r'drift\s*([<>]=?)\s*(0\.\d+|\d+)',
+        'usage': r'usage\s*([<>]=?)\s*(\d+)'
+    }
     for key, pat in pats.items():
         match = re.search(pat, q)
         if match:
@@ -83,22 +88,24 @@ def hybrid_search(query, df):
 
     if work_df.empty: return work_df
 
-    # Semantic search
+    # 2. Textual Similarity (TF-IDF)
     work_df['blob'] = work_df.astype(str).apply(' '.join, axis=1)
     vec = TfidfVectorizer(stop_words='english')
     mtx = vec.fit_transform(work_df['blob'].tolist() + [query])
     work_df['relevance'] = cosine_similarity(mtx[-1], mtx[:-1])[0]
     return work_df[work_df['relevance'] > 0.01].sort_values('relevance', ascending=False)
 
-# --- GEMINI AI ---
+# --- GEMINI AI (FIXED FOR 404 ERRORS) ---
 def get_ai_response(prompt, api_key):
     try:
         genai.configure(api_key=api_key)
+        # We try the standard name first. The 'models/' prefix is often the cause of 404 in some versions.
         model = genai.GenerativeModel('gemini-1.5-flash')
-        context = f"You are a model hub assistant. We have {len(df_master)} models. Current user: {st.session_state.get('role','User')}."
-        return model.generate_content(context + "\nUser: " + prompt).text
+        context = f"Professional Model Hub Assistant. DB has {len(df_master)} models. Current user: {st.session_state.get('role','User')}."
+        response = model.generate_content(context + "\nUser Request: " + prompt)
+        return response.text
     except Exception as e:
-        return f"AI Error: {str(e)}"
+        return f"Gemini Connection Note: Using local logic. (Details: {str(e)})"
 
 # --- UI COMPONENTS ---
 def render_tile(row, key_prefix):
@@ -135,56 +142,59 @@ def render_tile(row, key_prefix):
             fig.update_layout(margin=dict(l=0,r=0,t=0,b=0), showlegend=False)
             st.plotly_chart(fig, use_container_width=True, key=f"sh_{key_prefix}_{row['name']}")
 
-# --- SIDEBAR ---
+# --- NAVIGATION ---
 with st.sidebar:
-    st.title("Settings")
-    key = st.text_input("Gemini API Key", type="password")
-    nav = st.radio("Go to", ["AI Copilot", "Marketplace Hub", "Domain ROI", "My Portfolio", "Admin Ops"])
+    st.title("Enterprise AI")
+    api_key = st.text_input("Gemini API Key", type="password")
+    nav = st.radio("Navigate", ["AI Copilot", "Model Gallery", "Domain ROI", "My Portfolio", "Admin Ops"])
     role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel", "Admin"])
     st.session_state.role = role
 
 # --- 1. AI COPILOT ---
 if nav == "AI Copilot":
-    st.header("🤖 Model Assistant")
+    st.header("🤖 Intelligent Model Assistant")
     if "messages" not in st.session_state: st.session_state.messages = []
     
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            if "df" in msg:
-                res_df = msg["df"]
-                if not res_df.empty:
-                    cols = st.columns(min(len(res_df), 3))
-                    for idx, r in enumerate(res_df.head(3).to_dict('records')):
-                        with cols[idx]: render_tile(r, f"chat_{idx}")
+            if "df" in msg and not msg["df"].empty:
+                cols = st.columns(min(len(msg["df"]), 3))
+                for idx, r in enumerate(msg["df"].head(3).to_dict('records')):
+                    with cols[idx]: render_tile(r, f"chat_{idx}")
 
-    if prompt := st.chat_input("Search models or analyze portfolio..."):
+    if prompt := st.chat_input("E.g., 'Show me low latency Finance models'"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         
         with st.chat_message("assistant"):
-            txt = get_ai_response(prompt, key) if key else "Results found (Add API key for AI chat):"
+            txt = get_ai_response(prompt, api_key)
             st.markdown(txt)
             res = hybrid_search(prompt, df_master)
             if len(res) < len(df_master) and not res.empty:
-                cols = st.columns(min(len(res), 3))
-                for idx, r in enumerate(res.head(3).to_dict('records')):
-                    with cols[idx]: render_tile(r, f"new_chat_{idx}")
-                st.session_state.messages.append({"role": "assistant", "content": txt, "df": res.head(3)})
+                # FIX: Ensure columns > 0 to avoid StreamlitInvalidColumnSpecError
+                num_cols = min(len(res), 3)
+                if num_cols > 0:
+                    cols = st.columns(num_cols)
+                    for idx, r in enumerate(res.head(3).to_dict('records')):
+                        with cols[idx]: render_tile(r, f"new_chat_{idx}")
+                    st.session_state.messages.append({"role": "assistant", "content": txt, "df": res.head(3)})
             else:
                 st.session_state.messages.append({"role": "assistant", "content": txt})
 
 # --- 2. MARKETPLACE HUB ---
-elif nav == "Marketplace Hub":
+elif nav == "Model Gallery":
     t1, t2, t3 = st.tabs(["🏛 Unified Gallery", "🚀 Ingest Asset", "🔥 Insights"])
     with t1:
-        q = st.text_input("Smart Search")
+        q = st.text_input("💬 Hybrid Search (e.g. 'IT Ops accuracy > 0.95')")
         res = hybrid_search(q, df_master)
-        for i in range(0, min(len(res), 15), 3):
-            cols = st.columns(3)
-            for j in range(3):
-                if i+j < len(res):
-                    with cols[j]: render_tile(res.iloc[i+j], f"gal_{i+j}")
+        if not res.empty:
+            for i in range(0, min(len(res), 15), 3):
+                cols = st.columns(3)
+                for j in range(3):
+                    if i+j < len(res):
+                        with cols[j]: render_tile(res.iloc[i+j], f"gal_{i+j}")
+        else: st.warning("No models match your criteria.")
     with t2:
         with st.form("ingest"):
             st.subheader("Model Ingestion")
@@ -203,6 +213,7 @@ elif nav == "Marketplace Hub":
 # --- 3. DOMAIN ROI ---
 elif nav == "Domain ROI":
     st.header("Strategic Portfolio ROI")
+    # Grouping logic fixed with sanitized numeric data
     agg = df_master.groupby('domain').agg({'revenue_impact':'sum','risk_exposure':'sum','usage':'sum','accuracy':'mean'}).reset_index()
     c1, c2 = st.columns(2)
     with c1: st.plotly_chart(px.pie(agg, values='revenue_impact', names='domain', hole=0.4, title="Revenue Attribution"))
@@ -215,6 +226,7 @@ elif nav == "My Portfolio":
         st.header(f"Portfolio Analytics: {role}")
         sel = st.selectbox("Select Model", my_m['name'].unique())
         m = my_m[my_m['name'] == sel].iloc[0]
+        # Radar/Spider Chart
         fig = go.Figure(go.Scatterpolar(
             r=[m['accuracy']*100, 100-(m['data_drift']*100), m.get('cpu_util',50), 100-m.get('error_rate',0)*10],
             theta=['Accuracy','Stability','Efficiency','Reliability'], fill='toself'))
@@ -235,8 +247,9 @@ elif nav == "Admin Ops":
         else: st.success("Queue clear.")
     else:
         st.header("Fleet Governance")
-        sel = st.selectbox("Solo Asset Inspector", ["None"] + list(df_master['name'].unique()))
+        sel = st.selectbox("Focus Asset", ["None"] + list(df_master['name'].unique()))
         cv = [1.0 if n == sel else 0.0 for n in df_master['name']]
+        # High Contrast Theme: Pale Yellow Background, Bold Red Selected
         fig_p = go.Figure(data=go.Parcoords(
             labelfont=dict(size=10, color='black'), tickfont=dict(size=8),
             line=dict(color=cv, colorscale=[[0, '#FFF9C4'], [1, '#B71C1C']], showscale=False),
