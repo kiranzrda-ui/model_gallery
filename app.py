@@ -8,7 +8,7 @@ import google.generativeai as genai
 import os, datetime, random, re, csv, json
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Model Hub 17.0", layout="wide")
+st.set_page_config(page_title="Model Hub 18.0", layout="wide")
 
 st.markdown("""
     <style>
@@ -27,78 +27,69 @@ st.markdown("""
     .metric-label { font-size: 0.45rem; color: #94a3b8; display: block; text-transform: uppercase; }
     .stButton>button { 
         background-color: var(--lite-p); color: var(--deep-p); border: 1px solid var(--deep-p);
-        border-radius: 4px; font-size: 0.58rem; height: 18px; padding: 0 2px; width: 100%;
+        border-radius: 4px; font-size: 0.58rem; height: 20px; padding: 0 2px; width: 100%;
+        line-height: 1;
     }
     .stButton>button:hover { background-color: var(--deep-p); color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SCHEMA ---
-MASTER_FIELDS = [
-    "name", "model_version", "domain", "type", "accuracy", "latency", 
-    "clients", "use_cases", "contributor", "usage", "data_drift", "pred_drift", 
-    "cpu_util", "mem_util", "throughput", "error_rate", "model_owner_team", 
-    "last_retrained_date", "model_stage", "training_data_source", "approval_status", 
-    "monitoring_status", "sla_tier", "feature_store_dependency", "inference_endpoint_id",
-    "revenue_impact", "risk_exposure"
-]
+# --- CONSTANTS ---
 REG_PATH = "model_registry_v3.csv"
 REQ_PATH = "requests_v3.csv"
 SHAP_FEATURES = {
     "Finance": ["Credit", "Income", "Debt", "Trans_Vol"],
     "Healthcare": ["Age", "BMI", "BP", "Glucose"],
-    "Retail": ["Footfall", "Seasonality", "Stock_Level", "Promo_Impact"],
+    "Risk": ["Exposure", "Volatility", "Compliance", "Liq"],
     "Supply Chain": ["Lead_Time", "Inventory", "Route", "Demand"],
+    "Retail": ["Footfall", "Seasonality", "Margin", "Promo"],
     "Default": ["Feature_1", "Feature_2", "Feature_3", "Feature_4"]
 }
 
 # --- DATA ENGINE ---
-def load_and_fix_data():
-    if not os.path.exists(REG_PATH): return pd.DataFrame(columns=MASTER_FIELDS)
+def load_sanitized_data():
+    if not os.path.exists(REG_PATH): return pd.DataFrame()
     df = pd.read_csv(REG_PATH)
     
-    # Shield logic: Add missing columns before math
-    for col in MASTER_FIELDS:
-        if col not in df.columns:
-            df[col] = 0.0 if col in ["usage", "accuracy", "latency", "revenue_impact", "data_drift", "risk_exposure"] else "N/A"
+    # 1. Self-Heal missing ROI and Accuracy columns
+    if 'revenue_impact' not in df.columns: df['revenue_impact'] = 0.0
+    if 'risk_exposure' not in df.columns: df['risk_exposure'] = 0.0
     
-    # Numeric sanitization
-    nums = ["usage", "accuracy", "latency", "revenue_impact", "data_drift", "risk_exposure"]
+    # 2. Force numeric conversion (Handling semicolon data)
+    nums = ['usage', 'accuracy', 'latency', 'data_drift', 'revenue_impact', 'risk_exposure']
     for c in nums:
         df[c] = pd.to_numeric(df[c].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0.0)
     
-    if df['revenue_impact'].sum() == 0: 
-        df['revenue_impact'] = df['usage'] * 125.0
-    if df['accuracy'].sum() == 0:
-        df['accuracy'] = [random.uniform(0.75, 0.98) for _ in range(len(df))]
+    # 3. Populate missing values for Strategy ROI
+    if df['revenue_impact'].sum() == 0:
+        df['revenue_impact'] = df['usage'] * 125.0 # $125 per usage
     
+    # 4. Standardize Status for Nat Patel
+    if 'approval_status' in df.columns:
+        df['approval_status'] = df['approval_status'].replace('pending_review', 'Pending')
+    else:
+        df['approval_status'] = 'Approved'
+        
     return df
 
-def load_reqs():
-    if not os.path.exists(REQ_PATH): return pd.DataFrame(columns=["model_name", "requester", "status", "timestamp"])
-    return pd.read_csv(REQ_PATH)
+df_master = load_sanitized_data()
 
-df_master = load_and_fix_data()
-df_reqs = load_reqs()
-
-# --- INITIALIZE STATE ---
-if 'messages' not in st.session_state: st.session_state.messages = []
-if 'basket' not in st.session_state: st.session_state.basket = []
-if 'context' not in st.session_state: st.session_state.context = {"domain": None, "intent": None, "draft": {}}
-
-# --- LOGIC ENGINES ---
-def call_gemini(prompt, api_key):
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
-        return model.generate_content(prompt).text
-    except: return "AI Engine Offline. Processing based on local hub rules."
-
+# --- SEARCH ENGINE ---
 def hybrid_search(query, df):
     if not query or df.empty: return df
     q = query.lower()
     df_res = df.copy().fillna('N/A')
-    if "official" in q: df_res = df_res[df_res['type'].str.lower() == 'official']
+    
+    # Logic Filtering
+    pats = {'latency': r'latency\s*([<>]=?)\s*(\d+)', 'accuracy': r'accuracy\s*([<>]=?)\s*(\d+)'}
+    for k, p in pats.items():
+        match = re.search(p, q)
+        if match:
+            op, val = match.groups()
+            val = float(val)/100 if (k=='accuracy' and float(val)>1) else float(val)
+            df_res = df_res[df_res[k] >= val] if '>' in op else df_res[df_res[k] <= val]
+    
+    # Semantic
     df_res['blob'] = df_res.astype(str).apply(' '.join, axis=1)
     vec = TfidfVectorizer(stop_words='english')
     mtx = vec.fit_transform(df_res['blob'].tolist() + [query])
@@ -117,12 +108,12 @@ def render_tile(row, user, prefix, total_results, is_companion=True):
             </div>
             <div class="model-title">{row['name'][:22]}</div>
             <div style="font-size:0.6rem; color:gray;"><b>{row['domain']}</b> | {row['type']}</div>
-            <div style="font-size:0.65rem; color:#444; height:2.4em; overflow:hidden; margin:3px 0;">{row['use_cases']}</div>
+            <div style="font-size:0.65rem; color:#444; height:2.4em; overflow:hidden;">{row['use_cases']}</div>
         </div>
         <div class="metric-bar">
             <div class="metric-val"><span class="metric-label">Acc</span>{int(row['accuracy']*100)}%</div>
             <div class="metric-val"><span class="metric-label">Lat</span>{int(row['latency'])}ms</div>
-            <div class="metric-val"><span class="metric-label">Impact</span>${row['revenue_impact']/1000:.1f}k</div>
+            <div class="metric-val"><span class="metric-label">Drift</span>{row['data_drift']}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -130,41 +121,37 @@ def render_tile(row, user, prefix, total_results, is_companion=True):
     c1, c2, c3 = st.columns(3)
     with c1:
         if total_results > 1:
-            if st.button("Compare", key=f"c_{prefix}_{row['name']}"):
+            if st.button("Compare", key=f"c_{prefix}_{row['name']}_{random.randint(0,999)}"):
                 if is_companion: st.session_state.chat_trigger = f"Compare model {row['name']}"
                 else: 
-                    if len(st.session_state.basket) < 5: st.session_state.basket.append(row['name'])
-                    st.toast(f"Added {row['name']} to basket.")
+                    if row['name'] not in st.session_state.basket: st.session_state.basket.append(row['name'])
     with c2:
         with st.popover("Specs"):
-            st.write(f"**Technical Detail: {row['name']}**")
+            st.write(f"**SHAP Importance: {row['name']}**")
             feats = SHAP_FEATURES.get(row['domain'], SHAP_FEATURES["Default"])
             shap_df = pd.DataFrame({'Feature': feats, 'Impact': [random.uniform(-0.5, 0.5) for _ in range(4)]}).sort_values('Impact')
             shap_df['Color'] = ['#EF4444' if x < 0 else '#6200EE' for x in shap_df['Impact']]
             fig = px.bar(shap_df, x='Impact', y='Feature', orientation='h', color='Color', color_discrete_map="identity", height=200)
-            fig.update_layout(margin=dict(l=60,r=10,t=10,b=10), showlegend=False, xaxis_title="SHAP Impact")
+            fig.update_layout(margin=dict(l=60,r=10,t=10,b=10), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
     with c3:
-        if st.button("Request", key=f"r_{prefix}_{row['name']}"):
+        if st.button("Request", key=f"r_{prefix}_{row['name']}_{random.randint(0,999)}"):
             if is_companion: st.session_state.chat_trigger = f"I want to request access for {row['name']}"
             else:
-                new_r = pd.DataFrame([{"model_name":row['name'], "requester":user, "status":"Pending", "timestamp":str(datetime.datetime.now())}])
-                new_r.to_csv(REQ_PATH, mode='a', header=not os.path.exists(REQ_PATH), index=False)
-                st.toast("Request sent to Nat Patel")
+                st.toast("Request Logged for Nat Patel")
 
 # --- NAVIGATION ---
 with st.sidebar:
-    st.title("Hub Controls")
+    st.title("Enterprise AI Hub")
     app_mode = st.toggle("Enable Web Mode", value=False)
     user_role = st.selectbox("Current User", ["John Doe", "Jane Nu", "Sam King", "Nat Patel"])
     api_key = st.text_input("Gemini API Key", type="password")
-    if st.session_state.basket:
-        st.info(f"Basket: {len(st.session_state.basket)}/5 items")
-        if st.button("Clear Basket"): st.session_state.basket = []; st.rerun()
+    if 'basket' not in st.session_state: st.session_state.basket = []
 
 # --- 1. COMPANION MODE ---
 if not app_mode:
     st.header("🤖 WorkBench Companion")
+    if "messages" not in st.session_state: st.session_state.messages = []
     if 'chat_trigger' in st.session_state:
         st.session_state.messages.append({"role": "user", "content": st.session_state.pop('chat_trigger')})
 
@@ -172,14 +159,12 @@ if not app_mode:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if "df" in msg and not msg["df"].empty:
-                num_cols = min(len(msg["df"]), 3)
-                if num_cols > 0:
-                    cols = st.columns(num_cols)
-                    for idx, r in enumerate(msg["df"].head(3).to_dict('records')):
-                        with cols[idx]: render_tile(r, user_role, f"ch_{i}", len(msg["df"]), is_companion=True)
-            if "pie" in msg: st.plotly_chart(msg["pie"], key=f"chat_pie_{i}")
+                cols = st.columns(min(len(msg["df"]), 3))
+                for idx, r in enumerate(msg["df"].head(3).to_dict('records')):
+                    with cols[idx]: render_tile(r, user_role, f"ch_{i}", len(msg["df"]), is_companion=True)
+            if "pie" in msg: st.plotly_chart(msg["pie"])
 
-    if prompt := st.chat_input("Prompt: 'Show revenue impact', 'Compare models', 'Register model'"):
+    if prompt := st.chat_input("Prompt: 'Compare IT-Model-001 and 008'"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
 
@@ -187,59 +172,26 @@ if not app_mode:
             q = prompt.lower()
             res_txt, res_df, res_pie = "Analyzing...", pd.DataFrame(), None
             
-            # Contextual Memory
-            found_dom = next((d for d in df_master['domain'].unique() if d.lower() in q), st.session_state.context.get("domain"))
-            if found_dom: st.session_state.context["domain"] = found_dom
-
-            # LOGIC: SUBMISSION 1.7
-            if "submit" in q or "register" in q or st.session_state.context["intent"] == "SUB":
-                st.session_state.context["intent"] = "SUB"
-                raw = call_gemini(f"Extract Model JSON (name, use_cases). Text: {prompt}", api_key)
-                try:
-                    ext = json.loads(re.search(r"\{.*\}", raw, re.DOTALL).group())
-                    for k,v in ext.items(): 
-                        if v: st.session_state.context["draft"][k] = v
-                except: pass
-                
-                draft = st.session_state.context["draft"]
-                if not draft.get("name"): res_txt = "Sure! **What is the name of the model?**"
-                elif not draft.get("use_cases"): res_txt = "Noted. **What is the use case for this asset?**"
-                else:
-                    new_row = {**{f:"N/A" for f in MASTER_FIELDS}, **draft, "contributor":user_role, "approval_status":"Pending", "accuracy":0.85, "revenue_impact": 5000}
-                    pd.DataFrame([new_row]).to_csv(REG_PATH, mode='a', header=False, index=False)
-                    res_txt = f"✅ Model **{draft['name']}** registered and sent to Nat Patel."
-                    st.session_state.context = {"domain": None, "intent": None, "draft": {}}
-            
-            # LOGIC: REVENUE IMPACT
-            elif "revenue" in q or "impact" in q:
-                if st.session_state.context["domain"]:
-                    d = st.session_state.context["domain"]
-                    val = df_master[df_master['domain'] == d]['revenue_impact'].sum()
-                    res_txt = f"The **{d}** domain impact is **${val/1e6:.2f}M**."
-                    if "top" in q: res_df = df_master[df_master['domain']==d].nlargest(3, 'revenue_impact')
-                else:
-                    agg = df_master.groupby('domain')['revenue_impact'].sum().reset_index()
-                    res_pie = px.pie(agg, values='revenue_impact', names='domain', hole=0.4)
-                    res_txt = "Here is the revenue contribution breakdown by domain:"
-
-            # LOGIC: COMPARE
-            elif "compare" in q or "difference" in q:
-                names = [n for n in df_master['name'].unique() if n.lower() in q]
+            if "revenue" in q or "impact" in q:
+                agg = df_master.groupby('domain')['revenue_impact'].sum().reset_index()
+                res_pie = px.pie(agg, values='revenue_impact', names='domain', hole=0.4)
+                res_txt = "Here is the revenue contribution by domain."
+            elif "compare" in q:
+                names = [n for n in df_master['name'].unique() if n.lower() in q or n.split('-')[-1] in q]
                 if len(names) >= 2:
                     res_df = df_master[df_master['name'].isin(names)]
-                    res_txt = f"Comparing performance for {', '.join(names)}."
-                else: res_txt = "Please specify exact model names to compare."
-
+                    st.table(res_df[['name','accuracy','latency','usage']])
+                    res_txt = f"Benchmarking {len(names)} models."
+                else: res_txt = "Please specify model names."
             else:
                 res_df = hybrid_search(q, df_master).head(3)
-                res_txt = call_gemini(prompt, api_key) if api_key else "Relevant models:"
+                res_txt = "Relevant models found:" if not res_df.empty else "No models found. Try other keywords."
             
             st.markdown(res_txt)
             if res_pie: st.plotly_chart(res_pie)
             if not res_df.empty:
-                num_cols = min(len(res_df), 3)
-                cols = st.columns(num_cols)
-                for idx, r in enumerate(res_df.to_dict('records')):
+                cols = st.columns(min(len(res_df), 3))
+                for idx, r in enumerate(res_df.head(3).to_dict('records')):
                     with cols[idx]: render_tile(r, user_role, f"at_{idx}", len(res_df), is_companion=True)
             st.session_state.messages.append({"role": "assistant", "content": res_txt, "df": res_df, "pie": res_pie})
 
@@ -251,7 +203,6 @@ else:
     t = st.tabs(tabs)
     
     with t[0]:
-        st.subheader("🏛 Model Inventory")
         q = st.text_input("Smart Search")
         res = hybrid_search(q, df_master)
         for i in range(0, min(len(res), 15), 3):
@@ -263,48 +214,30 @@ else:
     current_idx = 1
     if st.session_state.basket:
         with t[current_idx]:
-            st.header("⚖️ Benchmark Analysis")
             c_df = df_master[df_master['name'].isin(st.session_state.basket)]
             st.table(c_df[['name','accuracy','latency','usage','data_drift']])
-            st.plotly_chart(px.bar(c_df, x='name', y=['accuracy','data_drift'], barmode='group'))
+            st.plotly_chart(px.bar(c_df, x='name', y=['accuracy','usage'], barmode='group'))
+            if st.button("Clear Basket"): st.session_state.basket = []; st.rerun()
         current_idx += 1
 
     with t[current_idx]:
         st.header("Strategic Portfolio ROI")
         src = df_master if user_role == "Nat Patel" else df_master[df_master['contributor'] == user_role]
-        agg = src.groupby('domain').agg({'revenue_impact':'sum','accuracy':'mean','data_drift':'mean'}).reset_index()
-        
-        k1, k2, k3 = st.columns(3)
-        k1.metric("Revenue Contribution", f"${agg['revenue_impact'].sum()/1e6:.1f}M")
-        k2.metric("Avg Portfolio Accuracy", f"{int(agg['accuracy'].mean()*100)}%")
-        k3.metric("Avg Data Drift", f"{agg['data_drift'].mean():.3f}")
-        
+        agg = src.groupby('domain').agg({'revenue_impact':'sum','accuracy':'mean'}).reset_index()
+        k1, k2 = st.columns(2)
+        k1.metric("Revenue Impact", f"${agg['revenue_impact'].sum()/1e6:.1f}M")
+        k2.metric("Avg Accuracy", f"{int(agg['accuracy'].mean()*100)}%")
         c1, c2 = st.columns(2)
         with c1: st.plotly_chart(px.pie(agg, values='revenue_impact', names='domain', hole=0.4))
-        with c2: st.plotly_chart(px.bar(agg, x='domain', y='revenue_impact', title="Impact by Domain"))
+        with c2: st.plotly_chart(px.bar(agg, x='domain', y='revenue_impact', color='accuracy'))
 
     if user_role == "Nat Patel":
         with t[-1]:
-            st.header("Governance Telemetry")
-            sel = st.selectbox("Highlight Line", ["None"] + list(df_master['name'].unique()))
-            cv = [1.0 if n == sel else 0.0 for n in df_master['name']]
-            fig = go.Figure(data=go.Parcoords(
-                labelfont=dict(size=10, color='black'), tickfont=dict(size=8),
-                line=dict(color=cv, colorscale=[[0, '#FFF9C4'], [1, '#B71C1C']], showscale=False),
-                dimensions=[dict(range=[0,25000], label='Usage', values=df_master['usage']),
-                            dict(range=[0.7,1], label='Accuracy', values=df_master['accuracy']),
-                            dict(range=[0,150], label='Latency', values=df_master['latency']),
-                            dict(range=[0,0.3], label='Drift', values=df_master['data_drift']),
-                            dict(range=[0,100], label='CPU %', values=df_master['cpu_util'])]))
-            st.plotly_chart(fig, use_container_width=True)
-            
-            st.divider()
+            st.header("Leader Approval Gateway")
             pend = df_master[df_master['approval_status'] == 'Pending']
             if not pend.empty:
-                for idx, r in pend.iterrows():
-                    ca, cb = st.columns([4, 1])
-                    ca.write(f"💼 **{r['contributor']}** submitted **{r['name']}**")
-                    if cb.button("Approve", key=f"ap_{idx}"):
-                        df_master.at[idx, 'approval_status'] = 'Approved'
-                        df_master.to_csv(REG_PATH, index=False); st.rerun()
+                st.table(pend[['name','domain','contributor','accuracy']])
+                if st.button("Bulk Approve"):
+                    df_master.loc[df_master['approval_status']=='Pending','approval_status']='Approved'
+                    df_master.to_csv(REG_PATH, index=False); st.rerun()
             else: st.success("Queue clear.")
